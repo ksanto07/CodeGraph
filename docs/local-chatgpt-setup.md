@@ -19,11 +19,10 @@ to `127.0.0.1` and enables the local request guard only in that child process.
 Use `pnpm local start` for an already-built app. Regular development and hosted
 servers keep local ChatGPT spending disabled.
 
-After connecting, choose exact dated model slugs returned by that account's
-catalog. Set `CARTOGRAPH_EXPLANATION_MODEL` and
-`CARTOGRAPH_CLASSIFICATION_MODEL` in the server's `.env.local`, then restart the
-local app. No moving alias or invented snapshot is accepted. If the account
-catalog has no dated snapshot, new inference stays unavailable.
+After connecting, choose exact model slugs returned by that account's catalog.
+Set `CARTOGRAPH_EXPLANATION_MODEL`, `CARTOGRAPH_CLASSIFICATION_MODEL`, and
+`CARTOGRAPH_AGENT_MODEL` in the server's `.env.local`, then restart the local app.
+Approved moving aliases use bounded cache windows described below.
 
 The connect command starts a listener on `127.0.0.1` before opening the system
 browser. Review the Cartograph registration and grant ChatGPT plan usage.
@@ -76,3 +75,15 @@ Protocol references, checked October 2, 2026.
 Boundary Discipline keeps owner authorization at the credential boundary.
 Model the Domain separates registration, active connection, and pending refresh
 so an unverified rotation cannot authorize a request.
+
+Model configuration uses exact returned catalog slugs in
+`CARTOGRAPH_EXPLANATION_MODEL`, `CARTOGRAPH_CLASSIFICATION_MODEL`, and
+`CARTOGRAPH_AGENT_MODEL`. User-approved catalog aliases are supported; they are
+not represented as immutable snapshots. Alias cache keys include
+`catalog-alias-v1` and a UTC day window, so saved explanations, labels, and agent
+rounds are reused for at most 24 hours. Dated snapshots retain stable keys. Both
+SQL cache shape constraints must accept real catalog slugs (migration 00005).
+Every agent round reads its bounded delegation cache inside the trace.
+
+Run `node scripts/verify-chatgpt-model.ts` for synthetic actual-SDK tool-call,
+reasoning replay, cache, streaming, and cancellation checks without spending.

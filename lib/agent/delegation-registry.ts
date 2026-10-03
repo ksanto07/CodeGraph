@@ -41,7 +41,7 @@ export class DelegationRegistry<T> {
     } catch (error) { this.#entries.delete(id); throw error; }
   }
 
-  async resolve(token: string): Promise<{ scope: Readonly<DelegationScope>; value: T }> {
+  async resolve(token: string): Promise<{ scope: Readonly<DelegationScope>; value: T; revoke: () => void }> {
     this.#expire();
     const { payload } = await jwtVerify(token, this.#key, {
       audience, algorithms: ['HS256'], typ: 'JWT', currentDate: new Date(this.#now()),
@@ -50,7 +50,8 @@ export class DelegationRegistry<T> {
     if (!entry || entry.expires <= this.#now() || payload.resource !== entry.scope.analysis ||
       payload.organization !== entry.scope.organization || payload.thread !== entry.scope.thread ||
       payload.exp !== Math.floor(entry.expires / 1000)) throw new Error('This repository question is no longer authorized.');
-    return { scope: entry.scope, value: entry.value };
+    const id = payload.jti;
+    return { scope: entry.scope, value: entry.value, revoke: () => { if (typeof id === 'string') this.#entries.delete(id); } };
   }
 
   revokeAnalysis(analysis: string) {

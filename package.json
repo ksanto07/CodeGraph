@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "local": "node scripts/local-app.ts",
+    "agent": "node scripts/local-agent.ts",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",

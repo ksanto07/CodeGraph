@@ -8,12 +8,14 @@ import { foldGraph } from '../canvas/model';
 import { runAI, tracingConfigured, type AICache, type AIRequest, type AIResult } from './client';
 import {
   explanationContext, explanationInput, explanationPaths, explanationKey, explanationInstructions, explanationPromptVersion,
-  classificationInstructions, classificationPromptVersion, readSemanticRole, semanticRoles,
+  classificationInstructions, classificationPromptVersion, readSemanticRole,
   type ExplainTarget, type ExplanationContext, type SemanticRole,
 } from './context';
 import { checkFreshness, type Freshness } from './freshness';
 import { accessTokenCredential, getLocalChatGPTStatus, listLocalChatGPTModels, LocalChatGPTError, type LocalChatGPTStatus } from './local-auth';
 import { requireLocalAIRequest } from './local-request';
+import { configuredModel, modelCachePolicy } from './model-policy';
+import { currentRole } from './current-roles';
 
 type Analysis = NonNullable<Awaited<ReturnType<typeof loadAnalysis>>>;
 type CompletedAnalysis = Analysis & { graph: NonNullable<Analysis['graph']>; commit: string };
@@ -30,8 +32,7 @@ const inflight = new Map<string, Promise<{ body: string; cached: boolean; tracin
 const generic = (file: FileNode) => file.annotations.role === 'generic' || !file.annotations.role;
 
 function modelPin(name: 'CARTOGRAPH_EXPLANATION_MODEL' | 'CARTOGRAPH_CLASSIFICATION_MODEL'): string | null {
-  const value = process.env[name]?.trim();
-  return value && /^.+-\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+  return configuredModel(process.env[name]);
 }
 function targetFrom(input: unknown): ExplainTarget {
   if (!input || typeof input !== 'object' || !('kind' in input) || !('id' in input) ||
@@ -46,11 +47,11 @@ function completed(analysis: Analysis | null): CompletedAnalysis {
 }
 function requestFor(context: ExplanationContext, model: string, classification = false): AIRequest {
   if (classification) return { operation: 'classify-file', model,
-    key: explanationKey(context, model, classificationPromptVersion), promptVersion: classificationPromptVersion,
+    key: explanationKey(context, modelCachePolicy(model).identity, classificationPromptVersion), promptVersion: classificationPromptVersion,
     instructions: classificationInstructions, input: JSON.stringify(context) };
   const input = explanationInput(context);
   return { operation: context.target.kind === 'file' ? 'explain-file' : 'explain-folder', model,
-    key: explanationKey(input, model, explanationPromptVersion), promptVersion: explanationPromptVersion,
+    key: explanationKey(input, modelCachePolicy(model).identity, explanationPromptVersion), promptVersion: explanationPromptVersion,
     instructions: explanationInstructions, input: JSON.stringify(input), allowedPaths: explanationPaths(input) };
 }
 function safeFailure(error: unknown): { status: 'unavailable' | 'error'; message: string } {
@@ -61,8 +62,8 @@ async function availability(userId: string): Promise<AIAvailability> {
   const explanationModel = modelPin('CARTOGRAPH_EXPLANATION_MODEL');
   const classificationModel = modelPin('CARTOGRAPH_CLASSIFICATION_MODEL');
   const messages: string[] = [];
-  if (!explanationModel) messages.push('Configure CARTOGRAPH_EXPLANATION_MODEL with an exact dated model from the connected account catalog.');
-  if (!classificationModel) messages.push('Configure CARTOGRAPH_CLASSIFICATION_MODEL with an exact dated model from the connected account catalog.');
+  if (!explanationModel) messages.push('Configure CARTOGRAPH_EXPLANATION_MODEL with a model from the connected account catalog.');
+  if (!classificationModel) messages.push('Configure CARTOGRAPH_CLASSIFICATION_MODEL with a model from the connected account catalog.');
   const tracing = tracingConfigured();
   if (!tracing) messages.push('AI tracing is not configured. Calls still work without traces.');
   let connectionStatus: LocalChatGPTStatus | null = null;
@@ -82,7 +83,7 @@ export async function loadAnalysisAI(id: string): Promise<AnalysisAIView | null>
   const client = await createSupabaseClient();
   const [explanationRows, roleRows] = await Promise.all([
     client.from('explanations').select('target_kind,target_path,content_key,model,prompt_version,body').eq('analysis_id', id).eq('model', ai.explanationModel ?? '').eq('prompt_version', explanationPromptVersion).eq('analyzed_commit', analysis.commit).order('created_at', { ascending: false }).limit(10000),
-    client.from('file_roles').select('role,content_key,model,prompt_version,source,file:files!file_roles_file_fk(path)').eq('analysis_id', id).eq('model', ai.classificationModel ?? '').eq('prompt_version', classificationPromptVersion).eq('analyzed_commit', analysis.commit).eq('source', 'ai').order('created_at', { ascending: false }).limit(10000),
+    client.from('file_roles').select('role,content_key,model,prompt_version,analyzed_commit,source,file:files!file_roles_file_fk(path)').eq('analysis_id', id).eq('model', ai.classificationModel ?? '').eq('prompt_version', classificationPromptVersion).eq('analyzed_commit', analysis.commit).eq('source', 'ai').order('created_at', { ascending: false }).limit(10000),
   ]);
   if (explanationRows.error || roleRows.error) {
     ai.messages.push('Stored AI results could not be loaded. Apply the AI cache migration and reload.');
@@ -101,12 +102,8 @@ export async function loadAnalysisAI(id: string): Promise<AnalysisAIView | null>
   }
   for (const row of roleRows.data) {
     if (!ai.classificationModel || row.model !== ai.classificationModel || row.prompt_version !== classificationPromptVersion || row.source !== 'ai' || !row.file) continue;
-    const file = analysis.graph.files.find(file => file.id === row.file?.path);
-    if (!file || !generic(file)) continue;
-    const role = semanticRoles.find(role => role === row.role);
-    if (!role) { ai.messages.push('An unsupported saved file role was omitted.'); continue; }
-    const context = explanationContext(analysis.graph.files, analysis.graph.edges, { kind: 'file', id: file.id });
-    if (requestFor(context, ai.classificationModel, true).key === row.content_key) roles[file.id] = role;
+    const role = currentRole(analysis.graph.files, analysis.graph.edges, analysis.commit, row, ai.classificationModel);
+    if (role) roles[row.file.path] = role;
   }
   return { ...analysis, graph: { ...analysis.graph, files: analysis.graph.files.map(file => roles[file.id] ? { ...file, annotations: { ...file.annotations, role: roles[file.id] } } : file) }, explanations, roles, ai };
 }
@@ -136,7 +133,7 @@ async function inference(id: string, analysis: CompletedAnalysis, context: Expla
   return runAI(request, cache, { credential: async () => {
     await requireLocalAIRequest('mutation');
     const models = await listLocalChatGPTModels(userId);
-    if (!models.some(model => model.slug === request.model)) throw new LocalChatGPTError('model_unavailable', 'The configured exact model is absent from this connected account catalog.');
+    if (!models.some(model => model.slug === request.model)) throw new LocalChatGPTError('model_unavailable', 'The configured model is absent from this connected account catalog.');
     return accessTokenCredential(userId);
   } });
 }
@@ -148,7 +145,7 @@ export async function explainAnalysis(id: string, input: unknown): Promise<Expla
     const target = targetFrom(input);
     const context = explanationContext(analysis.graph.files, analysis.graph.edges, target);
     const model = modelPin('CARTOGRAPH_EXPLANATION_MODEL');
-    if (!model) throw new LocalChatGPTError('model_unconfigured', 'Configure CARTOGRAPH_EXPLANATION_MODEL with an exact dated model from the connected account catalog.');
+    if (!model) throw new LocalChatGPTError('model_unconfigured', 'Configure CARTOGRAPH_EXPLANATION_MODEL with a model from the connected account catalog.');
     const request = requestFor(context, model);
     const result = await inference(id, analysis, context, request, userId);
     const freshness = await checkFreshness(analysis.repository, analysis.commit, context.members);
@@ -164,7 +161,7 @@ export async function classifyGenericFiles(id: string): Promise<ClassificationRe
   try {
     const analysis = completed(await loadAnalysis(id));
     const model = modelPin('CARTOGRAPH_CLASSIFICATION_MODEL');
-    if (!model) throw new LocalChatGPTError('model_unconfigured', 'Configure CARTOGRAPH_CLASSIFICATION_MODEL with an exact dated model from the connected account catalog.');
+    if (!model) throw new LocalChatGPTError('model_unconfigured', 'Configure CARTOGRAPH_CLASSIFICATION_MODEL with a model from the connected account catalog.');
     const hydrated = await loadAnalysisAI(id);
     if (!hydrated || hydrated.attempt !== analysis.attempt || !hydrated.graph) throw new LocalChatGPTError('analysis_changed', 'The analysis changed during classification. Reload its current map.');
     Object.assign(roles, hydrated?.roles);

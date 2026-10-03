@@ -10,6 +10,7 @@ import { insights } from '@/lib/canvas/graph-maths';
 import { canvasViewport } from '@/lib/canvas/viewport';
 import { Rail, type CoverageSummary } from './rail';
 import { DetailPane, type PaneExplanation } from './detail-pane';
+import { ChatPane } from './chat-pane';
 import { classifyAnalysisBatch, explainSelectedTarget } from '@/app/(workspace)/analyses/ai-actions';
 import type { AIAvailability, CachedExplanation } from '@/lib/ai/service';
 import type { Edge, FileNode } from '@/lib/parser/types';
@@ -61,6 +62,7 @@ function Canvas({ analysisId, attempt, ai, explanations, classifiedCount, files,
   const categoryFiles = useMemo(() => activeCategory ? new Set(files.filter(file => category(file).id === activeCategory).map(file => file.id)) : null, [files, activeCategory]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<Selection>(null);
+  const [paneMode, setPaneMode] = useState<'details' | 'ask'>('details');
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [explanationStates, setExplanationStates] = useState<Map<string, PaneExplanation>>(new Map());
@@ -221,7 +223,11 @@ function Canvas({ analysisId, attempt, ai, explanations, classifiedCount, files,
   return <><Rail metadata={metadata} repositoryName={repositoryName} files={files} edgeCount={edges.length} graph={graph} index={index} findings={findings} coverage={coverage} activeCategory={activeCategory} setCategory={setCategory} selectFile={selectFile} /><section className="graph-map" aria-label="Repository dependency map"><p className="graph-caption">Click a folder to open it. Select a file to trace its imports. Esc clears selection.{classificationMessage && <span className="classification-status" role="status">{classificationMessage}</span>}</p><ReactFlow zIndexMode="manual" elevateEdgesOnSelect={false} elevateNodesOnSelect={false} nodes={nodes} edges={canvasEdges} nodeTypes={nodeTypes} minZoom={0.05} maxZoom={1.5} nodesDraggable={false} nodesConnectable={false} edgesFocusable={false} onPaneClick={() => setSelection(null)} proOptions={{ hideAttribution: false }}>
     <Panel position="top-right"><div className="map-actions"><button className="clear-selection" title="Assign semantic roles to unidentified files using your connected ChatGPT plan." disabled={classifying || !classificationEnabled} onClick={classify}>{classifying ? 'Classifying…' : 'Classify files'}</button><button className="clear-selection" disabled={!selection} onClick={() => setSelection(null)}>Clear selection</button></div></Panel>
     <Background color="var(--border)" gap={20} size={1} /><Controls showInteractive={false} fitViewOptions={{ maxZoom: 1 }} />
-  </ReactFlow></section><DetailPane analysisId={analysisId} explanation={explanation} explanationEnabled={Boolean(ai.explanationModel)} explain={explain} metadata={metadata} categoryFiles={categoryFiles} repositoryName={repositoryName} edgeCount={edges.length} index={index} graph={graph} selection={selection} hover={hover} selectFile={selectFile} setHover={setHover} /></>;
+  </ReactFlow></section><div className="canvas-right-pane" data-mode={paneMode}>
+    <div className="canvas-pane-mode" aria-label="Right pane mode"><button aria-pressed={paneMode === 'details'} onClick={() => setPaneMode('details')}>Details</button><button aria-pressed={paneMode === 'ask'} onClick={() => setPaneMode('ask')}>Ask</button></div>
+    <div className="canvas-detail-mode" hidden={paneMode !== 'details'}><DetailPane analysisId={analysisId} explanation={explanation} explanationEnabled={Boolean(ai.explanationModel)} explain={explain} metadata={metadata} categoryFiles={categoryFiles} repositoryName={repositoryName} edgeCount={edges.length} index={index} graph={graph} selection={selection} hover={hover} selectFile={selectFile} setHover={setHover} /></div>
+    <ChatPane key={`${analysisId}:${attempt}`} analysisId={analysisId} active={paneMode === 'ask'} selection={selection} paths={[...index.files.keys()]} selectFile={selectFile} />
+  </div></>;
 }
 export function GraphCanvas(props: CanvasProps) {
   return <ReactFlowProvider><Canvas {...props} /></ReactFlowProvider>;

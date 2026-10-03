@@ -22,17 +22,17 @@ do $$ declare claimed jsonb; aid uuid; attempt uuid; graph jsonb; begin
   if jsonb_array_length(graph->'files')<>2 or jsonb_array_length(graph->'edges')<>1 then raise exception 'Graph round trip failed'; end if;
   if not exists(select 1 from public.routes where analysis_id=aid and path='/smoke' and method='GET') then raise exception 'Route publication failed'; end if;
   if public.write_explanation(aid,attempt,'file','source.ts',array['source.ts'],repeat('b',64),
-    'fixture-2026-01-01','explain-smoke',repeat('a',40),'First explanation',repeat('1',64)) is distinct from 'First explanation'
+    'gpt-5.6-sol','explain-smoke',repeat('a',40),'First explanation',repeat('1',64)) is distinct from 'First explanation'
     then raise exception 'Explanation publication failed'; end if;
   if public.write_explanation(aid,attempt,'file','source.ts',array['source.ts'],repeat('b',64),
-    'fixture-2026-01-01','explain-smoke',repeat('a',40),'Racing explanation',repeat('1',64)) is distinct from 'First explanation'
+    'gpt-5.6-sol','explain-smoke',repeat('a',40),'Racing explanation',repeat('1',64)) is distinct from 'First explanation'
     then raise exception 'Explanation conflict did not preserve the canonical first writer'; end if;
   if public.write_explanation(aid,attempt,'folder','.',array['source.ts','target.ts'],repeat('c',64),
-    'fixture-2026-01-01','explain-smoke',repeat('a',40),'Folder explanation',repeat('1',64)) is distinct from 'Folder explanation'
+    'gpt-5.6-sol','explain-smoke',repeat('a',40),'Folder explanation',repeat('1',64)) is distinct from 'Folder explanation'
     then raise exception 'Folder explanation publication failed'; end if;
-  if public.write_file_role(aid,attempt,'source.ts',repeat('d',64),'fixture-2026-01-01','classify-smoke',
+  if public.write_file_role(aid,attempt,'source.ts',repeat('d',64),'gpt-5.6-sol','classify-smoke',
     repeat('a',40),'service',repeat('1',64)) is distinct from 'service' then raise exception 'Role publication failed'; end if;
-  if public.write_file_role(aid,attempt,'source.ts',repeat('d',64),'fixture-2026-01-01','classify-smoke',
+  if public.write_file_role(aid,attempt,'source.ts',repeat('d',64),'gpt-5.6-sol','classify-smoke',
     repeat('a',40),'util',repeat('1',64)) is distinct from 'service'
     then raise exception 'Role conflict did not preserve the canonical first writer'; end if;
   if (select count(*) from public.explanations where analysis_id=aid)<>2
@@ -42,55 +42,55 @@ do $$ declare claimed jsonb; aid uuid; attempt uuid; graph jsonb; begin
     then raise exception 'Canonical cache reads failed'; end if;
   begin
     perform public.write_explanation(aid,attempt,'file','source.ts',array['source.ts'],repeat('e',64),
-      'fixture-2026-01-01','explain-smoke',repeat('a',40),'Denied',repeat('0',64));
+      'gpt-5.6-sol','explain-smoke',repeat('a',40),'Denied',repeat('0',64));
     raise exception 'Wrong explanation credential was accepted';
   exception when insufficient_privilege then null; end;
   begin
-    perform public.write_file_role(aid,attempt,'source.ts',repeat('e',64),'fixture-2026-01-01','classify-smoke',
+    perform public.write_file_role(aid,attempt,'source.ts',repeat('e',64),'gpt-5.6-sol','classify-smoke',
       repeat('a',40),'service',repeat('0',64));
     raise exception 'Wrong role credential was accepted';
   exception when insufficient_privilege then null; end;
   begin
     perform public.write_explanation(aid,attempt,'file','missing.ts',array['missing.ts'],repeat('e',64),
-      'fixture-2026-01-01','explain-smoke',repeat('a',40),'Denied',repeat('1',64));
+      'gpt-5.6-sol','explain-smoke',repeat('a',40),'Denied',repeat('1',64));
     raise exception 'Missing explanation target was accepted';
   exception when raise_exception then
     if sqlerrm <> 'The explanation target is absent from the current graph.' then raise; end if;
   end;
   begin
     perform public.write_explanation(aid,attempt,'folder','missing',array['source.ts'],repeat('e',64),
-      'fixture-2026-01-01','explain-smoke',repeat('a',40),'Denied',repeat('1',64));
+      'gpt-5.6-sol','explain-smoke',repeat('a',40),'Denied',repeat('1',64));
     raise exception 'Invalid folder members were accepted';
   exception when raise_exception then
     if sqlerrm <> 'The explanation target is absent from the current graph.' then raise; end if;
   end;
   begin
-    perform public.write_file_role(aid,attempt,'missing.ts',repeat('e',64),'fixture-2026-01-01','classify-smoke',
+    perform public.write_file_role(aid,attempt,'missing.ts',repeat('e',64),'gpt-5.6-sol','classify-smoke',
       repeat('a',40),'service',repeat('1',64));
     raise exception 'Missing role target was accepted';
   exception when no_data_found then null; end;
   begin
-    perform public.write_file_role(aid,attempt,'source.ts',repeat('e',64),'fixture-2026-01-01','classify-smoke',
+    perform public.write_file_role(aid,attempt,'source.ts',repeat('e',64),'gpt-5.6-sol','classify-smoke',
       repeat('a',40),'route',repeat('1',64));
     raise exception 'Structural role was accepted';
   exception when check_violation then null; end;
   begin
     perform public.write_explanation(aid,gen_random_uuid(),'file','source.ts',array['source.ts'],repeat('e',64),
-      'fixture-2026-01-01','explain-smoke',repeat('a',40),'Denied',repeat('1',64));
+      'gpt-5.6-sol','explain-smoke',repeat('a',40),'Denied',repeat('1',64));
     raise exception 'Stale explanation attempt was accepted';
   exception when no_data_found then null; end;
   begin
-    perform public.write_file_role(aid,gen_random_uuid(),'source.ts',repeat('e',64),'fixture-2026-01-01','classify-smoke',
+    perform public.write_file_role(aid,gen_random_uuid(),'source.ts',repeat('e',64),'gpt-5.6-sol','classify-smoke',
       repeat('a',40),'service',repeat('1',64));
     raise exception 'Stale role attempt was accepted';
   exception when no_data_found then null; end;
   begin
     perform public.write_explanation(aid,attempt,'file','source.ts',array['source.ts'],repeat('e',64),
-      'fixture-2026-01-01','explain-smoke',repeat('f',40),'Denied',repeat('1',64));
+      'gpt-5.6-sol','explain-smoke',repeat('f',40),'Denied',repeat('1',64));
     raise exception 'Stale explanation commit was accepted';
   exception when no_data_found then null; end;
   begin
-    perform public.write_file_role(aid,attempt,'source.ts',repeat('e',64),'fixture-2026-01-01','classify-smoke',
+    perform public.write_file_role(aid,attempt,'source.ts',repeat('e',64),'gpt-5.6-sol','classify-smoke',
       repeat('f',40),'service',repeat('1',64));
     raise exception 'Stale role commit was accepted';
   exception when no_data_found then null; end;
@@ -102,11 +102,11 @@ do $$ declare claimed jsonb; aid uuid; attempt uuid; graph jsonb; begin
     or exists(select 1 from public.file_roles where analysis_id=aid) then raise exception 'Cross-workspace cache was visible'; end if;
   begin
     perform public.write_explanation(aid,attempt,'file','source.ts',array['source.ts'],repeat('b',64),
-      'fixture-2026-01-01','explain-smoke',repeat('a',40),'Denied',repeat('1',64));
+      'gpt-5.6-sol','explain-smoke',repeat('a',40),'Denied',repeat('1',64));
     raise exception 'Cross-workspace explanation write succeeded';
   exception when no_data_found then null; end;
   begin
-    perform public.write_file_role(aid,attempt,'source.ts',repeat('d',64),'fixture-2026-01-01','classify-smoke',
+    perform public.write_file_role(aid,attempt,'source.ts',repeat('d',64),'gpt-5.6-sol','classify-smoke',
       repeat('a',40),'util',repeat('1',64));
     raise exception 'Cross-workspace role write succeeded';
   exception when no_data_found then null; end;
