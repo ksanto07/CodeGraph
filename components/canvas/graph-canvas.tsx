@@ -89,38 +89,42 @@ function Canvas({ analysisId, attempt, ai, explanations, classifiedCount, files,
       finally { requests.current.delete(key); }
     });
   }, [selection, explanationMap, analysisId]);
-  const classificationRun = useRef('');
+  const classificationRun = useRef<{ cancelled: boolean } | null>(null);
+  const [classifying, setClassifying] = useState(false);
   const [classificationMessage, setClassificationMessage] = useState('');
   const unidentifiedFiles = JSON.stringify(files.filter(file => file.annotations.role === 'generic' || !file.annotations.role).map(file => file.id).sort());
-  useEffect(() => {
-    const run = `${analysisId}:${attempt}:${ai.classificationModel}:${unidentifiedFiles}`;
-    if (classificationRun.current === run || !ai.classificationModel || !ai.connectionStatus?.authorized || !ai.connectionStatus.sharing || unidentifiedFiles === '[]') return;
+  const classificationEnabled = Boolean(ai.classificationModel && ai.connectionStatus?.authorized && ai.connectionStatus.sharing && unidentifiedFiles !== '[]');
+  const classify = () => {
+    if (classificationRun.current || !classificationEnabled) return;
+    const run = { cancelled: false };
     classificationRun.current = run;
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (cancelled) return;
-      startTransition(async () => {
+    setClassifying(true);
+    startTransition(async () => {
         let count = classifiedCount;
         let changed = false;
         setClassificationMessage('Assigning roles to unidentified files…');
         try {
           for (;;) {
             const result = await classifyAnalysisBatch(analysisId);
-            if (cancelled) break;
+            if (run.cancelled) break;
             const next = Object.keys(result.roles).length;
             changed ||= next > count;
             if (result.status !== 'ok') { setClassificationMessage(result.message ?? 'Role classification could not complete.'); break; }
             setClassificationMessage(result.remaining ? `${result.remaining} unidentified files remaining.` : 'File roles updated.');
             if (!result.remaining) break;
-            if (next <= count || result.processed === 0) { setClassificationMessage('Role classification made no progress. Reload to try again.'); break; }
+            if (next <= count || result.processed === 0) { setClassificationMessage('Role classification made no progress. Click Classify files to try again.'); break; }
             count = next;
           }
-        } catch { if (!cancelled) setClassificationMessage('Role classification could not complete. Reload to try again.'); }
-        finally { if (changed && !cancelled) router.refresh(); }
-      });
+        } catch { if (!run.cancelled) setClassificationMessage('Role classification could not complete. Click Classify files to try again.'); }
+        finally {
+          if (classificationRun.current === run) classificationRun.current = null;
+          setClassifying(false);
+          if (run.cancelled) setClassificationMessage('Classification stopped. Click Classify files to continue when available.');
+          if (changed && !run.cancelled) router.refresh();
+        }
     });
-    return () => { cancelled = true; if (classificationRun.current === run) classificationRun.current = ''; };
-  }, [analysisId, attempt, ai.classificationModel, ai.connectionStatus?.authorized, ai.connectionStatus?.sharing, unidentifiedFiles, classifiedCount, router]);
+  };
+  useEffect(() => () => { if (classificationRun.current) classificationRun.current.cancelled = true; }, [analysisId, attempt, ai.classificationModel, ai.connectionStatus?.authorized, ai.connectionStatus?.sharing, unidentifiedFiles]);
   const [hover, setHover] = useState<Selection>(null);
   const [reveal, setReveal] = useState<{ id: string; revision: number } | null>(null);
   const index = useMemo(() => detailIndex(files, edges), [files, edges]);
@@ -199,7 +203,7 @@ function Canvas({ analysisId, attempt, ai, explanations, classifiedCount, files,
     return () => cancelAnimationFrame(frame);
   }, [viewportReady, measuredSizes, positions, flow, nodes]);
   return <><Rail metadata={metadata} repositoryName={repositoryName} files={files} edgeCount={edges.length} graph={graph} index={index} findings={findings} coverage={coverage} activeCategory={activeCategory} setCategory={setCategory} selectFile={selectFile} /><section className="graph-map" aria-label="Repository dependency map"><p className="graph-caption">Click a folder to open it. Select a file to trace its imports. Esc clears selection.{classificationMessage && <span className="classification-status" role="status">{classificationMessage}</span>}</p><ReactFlow zIndexMode="manual" elevateEdgesOnSelect={false} elevateNodesOnSelect={false} nodes={nodes} edges={canvasEdges} nodeTypes={nodeTypes} minZoom={0.05} maxZoom={1.5} nodesDraggable={false} nodesConnectable={false} edgesFocusable={false} onPaneClick={() => setSelection(null)} proOptions={{ hideAttribution: false }}>
-    <Panel position="top-right"><button className="clear-selection" disabled={!selection} onClick={() => setSelection(null)}>Clear selection</button></Panel>
+    <Panel position="top-right"><div className="map-actions"><button className="clear-selection" title="Assign semantic roles to unidentified files using your connected ChatGPT plan." disabled={classifying || !classificationEnabled} onClick={classify}>{classifying ? 'Classifying…' : 'Classify files'}</button><button className="clear-selection" disabled={!selection} onClick={() => setSelection(null)}>Clear selection</button></div></Panel>
     <Background color="var(--border)" gap={20} size={1} /><Controls showInteractive={false} fitViewOptions={{ maxZoom: 1 }} />
   </ReactFlow></section><DetailPane analysisId={analysisId} explanation={explanation} explanationEnabled={Boolean(ai.explanationModel)} explain={explain} metadata={metadata} categoryFiles={categoryFiles} repositoryName={repositoryName} edgeCount={edges.length} index={index} graph={graph} selection={selection} hover={hover} selectFile={selectFile} setHover={setHover} /></>;
 }

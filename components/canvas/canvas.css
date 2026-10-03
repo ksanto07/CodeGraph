@@ -39,6 +39,7 @@
 
 .clear-selection { font-size: 11px; background: var(--panel); }
 .clear-selection:disabled { cursor: default; opacity: 0.5; }
+.map-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .graph-map .react-flow__edge-path { vector-effect: non-scaling-stroke; }
 
 .detail-tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }

@@ -78,8 +78,8 @@ export async function loadAnalysisAI(id: string): Promise<AnalysisAIView | null>
   if (!analysis.graph || !analysis.commit) return { ...analysis, explanations, roles, ai };
   const client = await createSupabaseClient();
   const [explanationRows, roleRows] = await Promise.all([
-    client.from('explanations').select('target_kind,target_path,content_key,model,prompt_version,body').eq('analysis_id', id).order('created_at', { ascending: false }).limit(10000),
-    client.from('file_roles').select('role,content_key,model,prompt_version,source,file:files!file_roles_file_fk(path)').eq('analysis_id', id).order('created_at', { ascending: false }).limit(10000),
+    client.from('explanations').select('target_kind,target_path,content_key,model,prompt_version,body').eq('analysis_id', id).eq('model', ai.explanationModel ?? '').eq('prompt_version', explanationPromptVersion).eq('analyzed_commit', analysis.commit).order('created_at', { ascending: false }).limit(10000),
+    client.from('file_roles').select('role,content_key,model,prompt_version,source,file:files!file_roles_file_fk(path)').eq('analysis_id', id).eq('model', ai.classificationModel ?? '').eq('prompt_version', classificationPromptVersion).eq('analyzed_commit', analysis.commit).eq('source', 'ai').order('created_at', { ascending: false }).limit(10000),
   ]);
   if (explanationRows.error || roleRows.error) {
     ai.messages.push('Stored AI results could not be loaded. Apply the AI cache migration and reload.');
