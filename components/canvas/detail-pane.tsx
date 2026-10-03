@@ -2,9 +2,10 @@ import { useMemo, useState } from 'react';
 import { category, type FolderGraph, type Selection } from '@/lib/canvas/model';
 import { walk, type WalkDirection } from '@/lib/canvas/graph-maths';
 import { folderKinds, type DetailIndex } from '@/lib/canvas/details';
+import type { FrameworkMetadata } from '@/lib/adapters/taxonomy';
 
-interface DetailProps { categoryFiles: Set<string> | null; repositoryName: string; edgeCount: number; index: DetailIndex; graph: FolderGraph; selection: Selection; hover: Selection; selectFile: (id: string) => void; setHover: (selection: Selection) => void }
-export function DetailPane({ categoryFiles, repositoryName, edgeCount, index, graph, selection, hover, selectFile, setHover }: DetailProps) {
+interface DetailProps { metadata: FrameworkMetadata; categoryFiles: Set<string> | null; repositoryName: string; edgeCount: number; index: DetailIndex; graph: FolderGraph; selection: Selection; hover: Selection; selectFile: (id: string) => void; setHover: (selection: Selection) => void }
+export function DetailPane({ metadata, categoryFiles, repositoryName, edgeCount, index, graph, selection, hover, selectFile, setHover }: DetailProps) {
   const [tab, setTab] = useState<'structure' | 'explanation'>('structure');
   const [traversal, setTraversal] = useState<{ id: string; direction: WalkDirection } | null>(null);
   const file = selection?.kind === 'file' ? index.files.get(selection.id) : undefined;
@@ -32,8 +33,9 @@ export function DetailPane({ categoryFiles, repositoryName, edgeCount, index, gr
         {folderKinds(folder).map(group => <section key={group.id} className="detail-section"><h3>{group.name} <span>{count(group.files.map(member => member.id))}</span></h3><ul className="detail-list">{group.files.map(member => <li key={member.id} className={categoryFiles && !categoryFiles.has(member.id) ? 'category-dimmed' : ''}>{path(member.id)}</li>)}</ul></section>)}
       </> : <>
         <h2 className="detail-heading">{repositoryName}</h2>
-        <dl className="detail-facts"><dt>Framework</dt><dd>Not detected</dd><dt>Files</dt><dd>{index.files.size}</dd><dt>Imports</dt><dd>{edgeCount}</dd><dt>Routes</dt><dd>Unavailable</dd><dt>Unidentified</dt><dd>{index.unidentified}</dd></dl>
-        <p className="detail-empty">Framework and route metadata are unavailable. Unidentified files have no convention annotation.</p>
+        <dl className="detail-facts"><dt>Framework</dt><dd>{metadata.framework === 'none' ? 'Not detected' : metadata.framework}</dd><dt>Files</dt><dd>{index.files.size}</dd><dt>Imports</dt><dd>{edgeCount}</dd><dt>Routes</dt><dd>{metadata.routes.length}</dd><dt>Unidentified</dt><dd>{index.unidentified}</dd></dl>
+        <p className="detail-empty">Routes are emitted only when the method and full pattern can be recovered exactly.</p>
+        <section className="detail-section"><h3>Routes <span>{metadata.routes.length}</span></h3>{metadata.routes.length ? <table className="routes-table"><thead><tr><th>Method</th><th>Pattern</th></tr></thead><tbody>{metadata.routes.map(route => <tr key={`${route.file}:${route.method}:${route.path}`}><td><code>{route.method}</code></td><td><button className="detail-path" title={route.file} onClick={() => selectFile(route.file)}>{route.path}</button></td></tr>)}</tbody></table> : <p className="detail-empty">No exactly recoverable routes.</p>}</section>
         <section className="detail-section"><h3>Most depended on <span>{count(index.dependedOn.map(member => member.id))}</span></h3>{index.dependedOn.length ? <ol className="detail-list detail-ranking">{index.dependedOn.map(member => <li key={member.id} className={categoryFiles && !categoryFiles.has(member.id) ? 'category-dimmed' : ''}>{path(member.id)}<small>{index.incoming.get(member.id)!.length} dependents</small></li>)}</ol> : <p className="detail-empty">None.</p>}</section>
         <section className="detail-section"><h3>Where to start <span>{count(index.entryFiles.map(member => member.id))}</span></h3><p className="detail-empty">Files nothing imports, ordered by dependency count.</p>{index.entryFiles.length ? <ol className="detail-list detail-ranking">{index.entryFiles.map(member => <li key={member.id} className={categoryFiles && !categoryFiles.has(member.id) ? 'category-dimmed' : ''}>{path(member.id)}<small>{index.outgoing.get(member.id)!.length} dependencies</small></li>)}</ol> : <p className="detail-empty">None.</p>}</section>
       </>}

@@ -84,3 +84,6 @@
 .traversal-buttons button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--background); }
 .traversal-results .detail-section { margin-top: 12px; }
 @media (max-width: 600px) { .category-list button { grid-template-columns: 6px 1fr; } }
+ .routes-table { width: 100%; border-collapse: collapse; font-size: 11px; text-align: left; }
+ .routes-table td, .routes-table th { padding: 5px 4px; border-bottom: 1px solid var(--border); vertical-align: top; }
+ .routes-table td:first-child { white-space: nowrap; }

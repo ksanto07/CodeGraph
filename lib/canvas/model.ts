@@ -1,4 +1,5 @@
 import type { Edge, FileNode } from '../parser/types.ts';
+import { roleCategory } from '../adapters/taxonomy.ts';
 
 export interface FolderNode { id: string; label: string; files: FileNode[]; fanIn: number; fanOut: number }
 export interface FolderGraph { folders: FolderNode[]; owner: Map<string, string>; edges: Edge[]; threshold: number }
@@ -81,6 +82,8 @@ export const categories = [
   { id: 'js', name: 'JavaScript', color: '#8a984b' },
 ] as const;
 export function category(file: FileNode) {
+  const role = roleCategory(file.annotations.role);
+  if (role) return role;
   const extension = file.id.split('.').at(-1);
   return categories.find(item => item.id === extension) ?? { id: 'other', name: 'Other scripts', color: '#76818c' };
 }

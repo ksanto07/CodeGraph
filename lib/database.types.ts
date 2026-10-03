@@ -263,6 +263,7 @@ export type Database = {
       }
       routes: {
         Row: {
+          method: string
           analysis_id: string
           file_id: string
           id: string
@@ -270,6 +271,7 @@ export type Database = {
           path: string
         }
         Insert: {
+          method?: string
           analysis_id: string
           file_id: string
           id?: string
@@ -277,6 +279,7 @@ export type Database = {
           path: string
         }
         Update: {
+          method?: string
           analysis_id?: string
           file_id?: string
           id?: string

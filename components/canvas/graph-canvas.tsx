@@ -9,10 +9,11 @@ import { insights } from '@/lib/canvas/graph-maths';
 import { Rail, type CoverageSummary } from './rail';
 import { DetailPane } from './detail-pane';
 import type { Edge, FileNode } from '@/lib/parser/types';
+import type { FrameworkMetadata } from '@/lib/adapters/taxonomy';
 import '@xyflow/react/dist/style.css';
 import './canvas.css';
 
-type CanvasProps = { files: FileNode[]; edges: Edge[]; repositoryName: string; coverage: CoverageSummary };
+type CanvasProps = { files: FileNode[]; edges: Edge[]; repositoryName: string; coverage: CoverageSummary; metadata: FrameworkMetadata };
 type PanelData = { categoryFiles: Set<string> | null; matches: number; folder: FolderNode; expanded: boolean; dimmed: boolean; highlightedFiles: Set<string>; selection: Selection; hover: Selection; reveal: { id: string; revision: number } | null; setHover: (selection: Selection) => void; start: number; labels: Map<string, string>; toggle: (id: string) => void; select: (selection: Selection) => void; scroll: (id: string, start: number) => void };
 type PanelNode = Node<PanelData, 'folder'>;
 function Endpoint({ id, top }: { id: string; top?: number }) {
@@ -50,7 +51,7 @@ function FolderPanel({ id, data }: NodeProps<PanelNode>) {
   </div>;
 }
 const nodeTypes = { folder: FolderPanel };
-function Canvas({ files, edges, repositoryName, coverage }: CanvasProps) {
+function Canvas({ files, edges, repositoryName, coverage, metadata }: CanvasProps) {
   const graph = useMemo(() => foldGraph(files, edges), [files, edges]);
   const [activeCategory, setCategory] = useState<string | null>(null);
   const categoryFiles = useMemo(() => activeCategory ? new Set(files.filter(file => category(file).id === activeCategory).map(file => file.id)) : null, [files, activeCategory]);
@@ -131,10 +132,10 @@ function Canvas({ files, edges, repositoryName, coverage }: CanvasProps) {
     });
     return () => cancelAnimationFrame(frame);
   }, [viewportReady, measuredSizes, positions, flow, nodes]);
-  return <><Rail repositoryName={repositoryName} files={files} edgeCount={edges.length} graph={graph} index={index} findings={findings} coverage={coverage} activeCategory={activeCategory} setCategory={setCategory} selectFile={selectFile} /><section className="graph-map" aria-label="Repository dependency map"><p className="graph-caption">Click a folder to open it. Select a file to trace its imports. Esc clears selection.</p><ReactFlow zIndexMode="manual" elevateEdgesOnSelect={false} elevateNodesOnSelect={false} nodes={nodes} edges={canvasEdges} nodeTypes={nodeTypes} minZoom={0.05} maxZoom={1.5} nodesDraggable={false} nodesConnectable={false} edgesFocusable={false} onPaneClick={() => setSelection(null)} proOptions={{ hideAttribution: false }}>
+  return <><Rail metadata={metadata} repositoryName={repositoryName} files={files} edgeCount={edges.length} graph={graph} index={index} findings={findings} coverage={coverage} activeCategory={activeCategory} setCategory={setCategory} selectFile={selectFile} /><section className="graph-map" aria-label="Repository dependency map"><p className="graph-caption">Click a folder to open it. Select a file to trace its imports. Esc clears selection.</p><ReactFlow zIndexMode="manual" elevateEdgesOnSelect={false} elevateNodesOnSelect={false} nodes={nodes} edges={canvasEdges} nodeTypes={nodeTypes} minZoom={0.05} maxZoom={1.5} nodesDraggable={false} nodesConnectable={false} edgesFocusable={false} onPaneClick={() => setSelection(null)} proOptions={{ hideAttribution: false }}>
     <Panel position="top-right"><button className="clear-selection" disabled={!selection} onClick={() => setSelection(null)}>Clear selection</button></Panel>
     <Background color="var(--border)" gap={20} size={1} /><Controls showInteractive={false} fitViewOptions={{ maxZoom: 1 }} />
-  </ReactFlow></section><DetailPane categoryFiles={categoryFiles} repositoryName={repositoryName} edgeCount={edges.length} index={index} graph={graph} selection={selection} hover={hover} selectFile={selectFile} setHover={setHover} /></>;
+  </ReactFlow></section><DetailPane metadata={metadata} categoryFiles={categoryFiles} repositoryName={repositoryName} edgeCount={edges.length} index={index} graph={graph} selection={selection} hover={hover} selectFile={selectFile} setHover={setHover} /></>;
 }
 export function GraphCanvas(props: CanvasProps) {
   return <ReactFlowProvider><Canvas {...props} /></ReactFlowProvider>;

@@ -9,6 +9,7 @@ import { parseRepository } from '../parser/repository';
 import { validateParseResult } from '../parser/result-file';
 import type { PipelineStage } from './progress';
 import { runnerConfigAdapter } from '../adapters/entry-points';
+import { analyzeFramework } from '../adapters/frameworks';
 
 interface Claim { id: string; attempt: string; started: boolean }
 function readClaim(value: unknown): Claim {
@@ -50,9 +51,10 @@ async function executeRun(client: SupabaseClient<Database>, claim: Claim, addres
     if (!await advance('parse', 'Resolving imports and recording coverage.')) return;
     const parsed = await parseRepository(archive.directory, runnerConfigAdapter);
     if (parsed.files.length > 10_000 || parsed.edges.length > 60_000) throw new Error('This repository exceeds the local limit of 10,000 source files or 60,000 imports.');
-    const result = validateParseResult(parsed);
+    const adapted = await analyzeFramework(archive.directory, parsed);
+    const result = validateParseResult(adapted.graph);
     if (!await advance('store', `Storing ${result.files.length} files and ${result.edges.length} resolved imports.`)) return;
-    const payload: Json = JSON.parse(JSON.stringify(result));
+    const payload: Json = JSON.parse(JSON.stringify({ ...result, frameworkMetadata: adapted.metadata }));
     const { error } = await client.rpc('publish_analysis', { analysis_id: claim.id, attempt: claim.attempt, commit_id: archive.commit, parsed: payload });
     if (error) throw new Error('Could not store the repository map.', { cause: error });
   } catch (error) {
