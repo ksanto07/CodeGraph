@@ -5,9 +5,9 @@ import { requireWorkspace } from '../workspace';
 import { pipelineWriteCredential } from '../pipeline/write-credential';
 import type { FileNode } from '../parser/types';
 import { foldGraph } from '../canvas/model';
-import { runAI, tracingConfigured, type AICache, type AIRequest } from './client';
+import { runAI, tracingConfigured, type AICache, type AIRequest, type AIResult } from './client';
 import {
-  explanationContext, explanationKey, explanationInstructions, explanationPromptVersion,
+  explanationContext, explanationInput, explanationPaths, explanationKey, explanationInstructions, explanationPromptVersion,
   classificationInstructions, classificationPromptVersion, readSemanticRole, semanticRoles,
   type ExplainTarget, type ExplanationContext, type SemanticRole,
 } from './context';
@@ -23,7 +23,7 @@ export type AnalysisAIView = Analysis & {
   explanations: CachedExplanation[]; roles: Record<string, SemanticRole>; ai: AIAvailability;
 };
 export type ExplanationResult =
-  | { status: 'ok'; target: ExplainTarget; key: string; model: string; body: string; cached: boolean; tracing: boolean; freshness: Freshness }
+  | (AIResult & { status: 'ok'; target: ExplainTarget; key: string; model: string; freshness: Freshness })
   | { status: 'unavailable' | 'error'; message: string };
 export interface ClassificationResult { status: 'ok' | 'unavailable' | 'error'; roles: Record<string, SemanticRole>; remaining: number; processed: number; message?: string }
 const inflight = new Map<string, Promise<{ body: string; cached: boolean; tracing: boolean }>>();
@@ -45,10 +45,13 @@ function completed(analysis: Analysis | null): CompletedAnalysis {
   return { ...analysis, graph: analysis.graph, commit: analysis.commit };
 }
 function requestFor(context: ExplanationContext, model: string, classification = false): AIRequest {
-  const operation = classification ? 'classify-file' : context.target.kind === 'file' ? 'explain-file' : 'explain-folder';
-  const version = classification ? classificationPromptVersion : explanationPromptVersion;
-  return { operation, model, key: explanationKey(context, model, version),
-    instructions: classification ? classificationInstructions : explanationInstructions, input: JSON.stringify(context) };
+  if (classification) return { operation: 'classify-file', model,
+    key: explanationKey(context, model, classificationPromptVersion), promptVersion: classificationPromptVersion,
+    instructions: classificationInstructions, input: JSON.stringify(context) };
+  const input = explanationInput(context);
+  return { operation: context.target.kind === 'file' ? 'explain-file' : 'explain-folder', model,
+    key: explanationKey(input, model, explanationPromptVersion), promptVersion: explanationPromptVersion,
+    instructions: explanationInstructions, input: JSON.stringify(input), allowedPaths: explanationPaths(input) };
 }
 function safeFailure(error: unknown): { status: 'unavailable' | 'error'; message: string } {
   if (error instanceof LocalChatGPTError) return { status: 'unavailable', message: error.message };

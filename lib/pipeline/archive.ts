@@ -22,8 +22,9 @@ export async function repositoryCommit(address: RepositoryAddress): Promise<stri
   return data.sha;
 }
 
-export async function fetchRepository(address: RepositoryAddress): Promise<RepositoryArchive> {
-  const commit = await repositoryCommit(address);
+export async function fetchRepository(address: RepositoryAddress, pinnedCommit?: string): Promise<RepositoryArchive> {
+  if (pinnedCommit !== undefined && !/^[a-f0-9]{40}$/.test(pinnedCommit)) throw new Error('An archive pin must be an immutable commit.');
+  const commit = pinnedCommit ?? await repositoryCommit(address);
   const response = await fetch(`https://codeload.github.com/${address.slug}/tar.gz/${commit}`, { signal: AbortSignal.timeout(60_000) });
   if (!response.ok || !response.body) throw new Error(`GitHub could not return the archive (${response.status}).`);
   const reader = response.body.getReader();
