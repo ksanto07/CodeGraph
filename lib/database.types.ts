@@ -310,8 +310,8 @@ export type Database = {
     Functions: {
       claim_repository: { Args: { repository_slug: string }; Returns: Json }
       restart_analysis: { Args: { analysis_id: string }; Returns: Json }
-      advance_analysis: { Args: { analysis_id: string; attempt: string; next_stage: string; status_message: string; failed?: boolean }; Returns: boolean }
-      publish_analysis: { Args: { analysis_id: string; attempt: string; commit_id: string; parsed: Json }; Returns: boolean }
+      advance_analysis: { Args: { analysis_id: string; attempt: string; next_stage: string; status_message: string; write_secret: string; failed?: boolean }; Returns: boolean }
+      publish_analysis: { Args: { analysis_id: string; attempt: string; commit_id: string; parsed: Json; write_secret: string }; Returns: boolean }
       analysis_graph: { Args: { analysis_id: string }; Returns: Json }
       ensure_current_organization: { Args: Record<PropertyKey, never>; Returns: undefined }
     }

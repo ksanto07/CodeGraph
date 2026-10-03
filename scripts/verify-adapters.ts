@@ -29,6 +29,41 @@ try {
   assert.equal(next.metadata.framework, 'nextjs');
   assert.deepEqual(next.metadata.routes.map(({ method, path }) => [method, path]), [['GET', '/docs/[slug]'], ['GET', '/docs/api/items'], ['POST', '/docs/api/items'], ['GET', '/docs/blog']]);
   assert.equal(next.graph.files.find(file => file.id.includes('_private'))?.annotations.role, 'generic');
+  const mixed = await fixture({
+    'packages/ui/package.json': JSON.stringify({ dependencies: { react: '*' } }),
+    'packages/ui/pages/example.tsx': 'export default function Example() { return null }',
+    'packages/api/package.json': JSON.stringify({ dependencies: { '@nestjs/core': '*' } }),
+    'packages/api/items.controller.ts': "import { Controller, Get } from '@nestjs/common'; @Controller('items') export class Items { @Get() list() {} }",
+    'packages/other/package.json': JSON.stringify({ dependencies: { '@nestjs/core': '*' } }),
+    'packages/other/main.ts': "app.setGlobalPrefix('other');",
+    'packages/other/other.controller.ts': "import { Controller, Get } from '@nestjs/common'; @Controller('other') export class Other { @Get() list() {} }",
+  });
+  assert.equal(mixed.metadata.framework, 'nextjs');
+  assert.equal(mixed.graph.files.find(file => file.id === 'packages/ui/pages/example.tsx')?.annotations.role, 'component');
+  assert.equal(mixed.graph.files.find(file => file.id === 'packages/ui/pages/example.tsx')?.annotations.entryPoint, undefined);
+  assert(mixed.metadata.routes.some(route => route.file === 'packages/api/items.controller.ts' && route.path === '/items'));
+  assert(!mixed.metadata.routes.some(route => route.file.startsWith('packages/ui/') || route.file.startsWith('packages/other/')));
+  await rm(path.join(root, 'packages/web/next.config.ts'));
+  const commonjs = await fixture({ 'packages/web/next.config.cjs': "module.exports = { basePath: '/manual' };" });
+  assert(commonjs.metadata.routes.filter(route => route.file.startsWith('packages/web/')).every(route => route.path.startsWith('/manual/')));
+  assert.equal(commonjs.metadata.routes.filter(route => route.file.startsWith('packages/web/')).length, 4);
+  for (const config of [
+    'module.exports = buildConfig();',
+    'module.exports = { basePath: process.env.PREFIX };',
+    "const module = {}; module.exports = { basePath: '/fake' };",
+    "function configure(module) { module.exports = { basePath: '/fake' }; }",
+    "module.exports = { basePath: '/first' }; module.exports = { basePath: '/second' };",
+    "module.exports = { basePath: '/first' }; module.exports.basePath = process.env.PREFIX;",
+    "module.exports = { basePath: '/first' }; Object.assign(module.exports, { basePath: process.env.PREFIX });",
+  ]) {
+    const result = await fixture({ 'packages/web/next.config.cjs': config });
+    assert(!result.metadata.routes.some(route => route.file.startsWith('packages/web/')), config);
+    assert(result.metadata.routes.some(route => route.path === '/items'));
+  }
+  await rm(path.join(root, 'packages/web/next.config.cjs'));
+  const variable = await fixture({ 'packages/web/next.config.ts': "const config = { basePath: '/variable' }; export default config;" });
+  assert.equal(variable.metadata.routes.filter(route => route.file.startsWith('packages/web/')).length, 4);
+  assert(variable.metadata.routes.filter(route => route.file.startsWith('packages/web/')).every(route => route.path.startsWith('/variable/')));
   await rm(path.join(root, 'packages'), { recursive: true });
   const nest = await fixture({
     'package.json': JSON.stringify({ dependencies: { '@nestjs/core': '*', react: '*' } }),
@@ -38,5 +73,5 @@ try {
   assert.equal(nest.metadata.framework, 'nestjs');
   assert.deepEqual(nest.metadata.routes.map(({ method, path }) => [method, path]), [['POST', '/items'], ['GET', '/items/:id']]);
   assert.equal(nest.graph.files.find(file => file.id === 'items.service.ts')?.annotations.role, 'service');
-  console.log('Adapter verification passed. Monorepo detection, exact Next and Nest routes, nonliteral omission, private folders, and graph preservation.');
+  console.log('Adapter verification passed. Per-package monorepo roles and routes, package-scoped Nest invalidation, static CommonJS and ESM config, dynamic and shadowed config omission, and graph preservation.');
 } finally { await rm(root, { recursive: true, force: true }); }

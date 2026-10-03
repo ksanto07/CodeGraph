@@ -14,7 +14,23 @@ try {
   await writeFile(path.join(root, 'service/item.cjs'), 'module.exports = { alpha: 1, beta() {} };');
   await writeFile(path.join(root, 'controllers/item.js'), "const one = require('../service/item.cjs'); const two = require('../service/item.cjs'); import '../service/item.cjs'; require(dynamicPath);");
   await writeFile(path.join(root, 'shadow.js'), "function require(path) { return path } require('./absent');");
+  const exportsCases: Record<string, { source: string; names: string[] }> = {
+    'replacement.cjs': { source: 'exports.old = 1; module.exports = { current: 2 }; exports.detached = 3; module.exports.new = 4;', names: ['current', 'new'] },
+    'twice.cjs': { source: 'module.exports = { old: 1 }; module.exports = { current: 2 };', names: ['current'] },
+    'alias.cjs': { source: 'exports.before = 1; exports = {}; exports.detached = 2; module.exports.after = 3;', names: ['after', 'before'] },
+    'shadow-exports.cjs': { source: 'const exports = {}; exports.fake = 1; module.exports.real = 2;', names: ['real'] },
+    'shadow-module.cjs': { source: 'const module = { exports: {} }; module.exports.fake = 1; exports.real = 2;', names: ['real'] },
+    'shadow-class.cjs': { source: 'class module {} module.exports = { fake: 1 }; exports.real = 2;', names: ['real'] },
+    'shadow-parameter.cjs': { source: 'exports.real = 1; function change(module, exports) { module.exports.fake = 2; exports.fake = 3; }', names: ['real'] },
+    'reattach.cjs': { source: 'module.exports = { current: 1 }; exports = module.exports; exports.next = 2;', names: ['current', 'next'] },
+    'conditional.cjs': { source: 'exports.before = 1; if (flag) module.exports = { maybe: 2 };', names: [] },
+    'function.cjs': { source: 'exports.before = 1; function change() { exports.maybe = 2; }', names: [] },
+    'mixed.js': { source: 'export const stable = 1; exports.old = 1; module.exports = { current: 2 };', names: ['current', 'stable'] },
+    'bracket.cjs': { source: 'exports.old = 1; module["exports"] = { current: 2 }; module["exports"]["new"] = 3;', names: ['current', 'new'] },
+  };
+  for (const [name, fixture] of Object.entries(exportsCases)) await writeFile(path.join(root, name), fixture.source);
   const parsed = await parseRepository(root);
+  for (const [name, fixture] of Object.entries(exportsCases)) assert.deepEqual(parsed.files.find(file => file.id === name)?.exportNames, fixture.names, name);
   assert.equal(parsed.coverage.filter(item => item.kind === 'require').length, 3);
   assert.equal(parsed.edges.filter(edge => edge.kind === 'require').length, 1);
   assert.equal(parsed.edges.filter(edge => edge.kind === 'import').length, 1);

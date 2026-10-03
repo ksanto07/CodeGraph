@@ -1,6 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { Node, Project, type SourceFile } from 'ts-morph';
+import { Node, Project, SyntaxKind, type SourceFile } from 'ts-morph';
 import type { ParseResult } from '../parser/types.ts';
 import { nextEntryAdapter, runnerConfigAdapter } from './entry-points.ts';
 import type { FrameworkId, FrameworkMetadata, FrameworkRoute } from './taxonomy.ts';
@@ -40,6 +40,31 @@ function basePath(source: SourceFile | undefined): string | undefined {
   if (!source) return '';
   const assignments = source.getExportAssignments();
   let object: Node | undefined = assignments.find(item => !item.isExportEquals())?.getExpression();
+  if (!object) {
+    const writes = source.getDescendantsOfKind(SyntaxKind.BinaryExpression).filter(expression => {
+      const left = expression.getLeft();
+      return Node.isPropertyAccessExpression(left) && left.getText() === 'module.exports';
+    });
+    if (writes.length !== 1) return;
+    const write = writes[0];
+    const left = write.getLeft();
+    if (!Node.isPropertyAccessExpression(left)) return;
+    const shadowed = source.getDescendantsOfKind(SyntaxKind.Identifier).some(identifier => {
+      if (identifier.getText() !== 'module') return false;
+      const parent = identifier.getParent();
+      return ((Node.isVariableDeclaration(parent) || Node.isParameterDeclaration(parent) || Node.isFunctionDeclaration(parent) || Node.isClassDeclaration(parent) || Node.isBindingElement(parent)) && parent.getNameNode() === identifier) ||
+        (Node.isImportClause(parent) && parent.getDefaultImport() === identifier) ||
+        (Node.isImportSpecifier(parent) && (parent.getAliasNode() ?? parent.getNameNode()) === identifier);
+    });
+    const mutated = source.getDescendantsOfKind(SyntaxKind.BinaryExpression).some(expression => {
+      const target = expression.getLeft().getText();
+      return target.startsWith('module.exports.') || target.startsWith('module.exports[') || target.startsWith('exports.') || target.startsWith('exports[');
+    });
+    const otherAccess = source.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression).some(access => access.getText() === 'module.exports' && access !== left);
+    if (shadowed || mutated || otherAccess || write.getOperatorToken().getKind() !== SyntaxKind.EqualsToken || !Node.isExpressionStatement(write.getParent()) || write.getParent()?.getParent() !== source) return;
+    object = write.getRight();
+    if (!Node.isObjectLiteralExpression(object)) return;
+  }
   if (object && Node.isIdentifier(object)) object = source.getVariableDeclaration(object.getText())?.getInitializer();
   if (!object || !Node.isObjectLiteralExpression(object)) return;
   if (object.getProperties().some(property => Node.isSpreadAssignment(property) || ('getNameNode' in property && Node.isComputedPropertyName(property.getNameNode())))) return;
@@ -54,13 +79,21 @@ export async function analyzeFramework(root: string, graph: ParseResult): Promis
   const packages = await manifests(root);
   const detection: [FrameworkId, string][] = [['nextjs', 'next'], ['nestjs', '@nestjs/core'], ['react', 'react'], ['express', 'express']];
   const framework = detection.find(([, dependency]) => packages.some(item => item.dependencies.has(dependency)))?.[0] ?? 'none';
+  const packageFramework = new Map(packages.map(item => [item, detection.find(([, dependency]) => item.dependencies.has(dependency))?.[0] ?? 'none']));
+  const owners = new Map(graph.files.map(file => [file.id, packages.filter(item => !item.folder || file.id.startsWith(item.folder + '/')).sort((a, b) => b.folder.length - a.folder.length)[0]]));
   const project = new Project({ skipAddingFilesFromTsConfig: true });
   const sources = new Map<string, SourceFile>();
   for (const file of graph.files) sources.set(file.id, project.addSourceFileAtPath(path.join(root, file.id)));
+  const configuredNestPackages = new Set(graph.files.filter(file => {
+    const owner = owners.get(file.id);
+    const text = sources.get(file.id)!.getFullText();
+    return owner && packageFramework.get(owner) === 'nestjs' && (/\.(?:setGlobalPrefix|enableVersioning)\s*\(/.test(text) || text.includes('RouterModule.register'));
+  }).map(file => owners.get(file.id)));
   const routes: FrameworkRoute[] = [];
   const files = graph.files.map(file => {
     const source = sources.get(file.id)!;
-    const owner = packages.filter(item => !item.folder || file.id.startsWith(item.folder + '/')).sort((a, b) => b.folder.length - a.folder.length)[0];
+    const owner = owners.get(file.id);
+    const framework = owner ? packageFramework.get(owner)! : 'none';
     const relative = owner?.folder ? file.id.slice(owner.folder.length + 1) : file.id;
     const annotated = (framework === 'nextjs' ? nextEntryAdapter : runnerConfigAdapter).annotate({ ...file, id: relative });
     let role = annotated.entryPoint === 'config' ? 'config' : 'generic';
@@ -86,7 +119,7 @@ export async function analyzeFramework(root: string, graph: ParseResult): Promis
       else if (/(?:^|\/)components\//.test(relative) || /\.[jt]sx$/.test(relative)) role = 'component';
     } else if (framework === 'nestjs') {
       role = /\.(controller|service|module|entity)\.[jt]s$/.exec(relative)?.[1] ?? role;
-      if (role === 'controller') {
+      if (role === 'controller' && !configuredNestPackages.has(owner)) {
         const imported = new Map<string, string>();
         source.getImportDeclarations().filter(item => item.getModuleSpecifierValue() === '@nestjs/common').forEach(item => item.getNamedImports().forEach(name => imported.set(name.getAliasNode()?.getText() ?? name.getName(), name.getName())));
         for (const controller of source.getClasses()) {
@@ -120,8 +153,6 @@ export async function analyzeFramework(root: string, graph: ParseResult): Promis
     }
     return { ...file, annotations: { ...annotated, role } };
   });
-  // Runtime routing configuration cannot be safely combined with controller syntax.
-  if (framework === 'nestjs' && [...sources.values()].some(source => /\.(?:setGlobalPrefix|enableVersioning)\s*\(/.test(source.getFullText()) || source.getFullText().includes('RouterModule.register'))) routes.length = 0;
   routes.sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method) || a.file.localeCompare(b.file));
   return { graph: { ...graph, files }, metadata: { framework, routes } };
 }

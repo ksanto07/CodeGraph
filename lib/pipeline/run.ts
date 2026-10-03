@@ -10,6 +10,7 @@ import { validateParseResult } from '../parser/result-file';
 import type { PipelineStage } from './progress';
 import { runnerConfigAdapter } from '../adapters/entry-points';
 import { analyzeFramework } from '../adapters/frameworks';
+import { pipelineWriteCredential } from './write-credential';
 
 interface Claim { id: string; attempt: string; started: boolean }
 function readClaim(value: unknown): Claim {
@@ -18,14 +19,16 @@ function readClaim(value: unknown): Claim {
 }
 export async function submitRepository(url: string): Promise<string> {
   const address = repositoryAddress(url);
+  const writeSecret = pipelineWriteCredential();
   const client = await createSupabaseClient();
   const { data, error } = await client.rpc('claim_repository', { repository_slug: address.slug });
   if (error) throw new Error('Could not start the analysis. Apply the pipeline migration and check your workspace.', { cause: error });
   const claim = readClaim(data);
-  if (claim.started) after(() => executeRun(client, claim, address));
+  if (claim.started) after(() => executeRun(client, claim, address, writeSecret));
   return claim.id;
 }
 export async function restartRepository(id: string): Promise<void> {
+  const writeSecret = pipelineWriteCredential();
   const client = await createSupabaseClient();
   const { data: analysis, error: lookupError } = await client.from('analyses').select('project:projects!analyses_project_fk(repository)').eq('id', id).eq('is_seed', false).single();
   if (lookupError || !analysis?.project) throw new Error('This analysis is unavailable.');
@@ -33,14 +36,14 @@ export async function restartRepository(id: string): Promise<void> {
   const { data, error } = await client.rpc('restart_analysis', { analysis_id: id });
   if (error) throw new Error('Could not restart the analysis.', { cause: error });
   const claim = readClaim(data);
-  if (claim.started) after(() => executeRun(client, claim, address));
+  if (claim.started) after(() => executeRun(client, claim, address, writeSecret));
 }
-async function executeRun(client: SupabaseClient<Database>, claim: Claim, address: ReturnType<typeof repositoryAddress>): Promise<void> {
+async function executeRun(client: SupabaseClient<Database>, claim: Claim, address: ReturnType<typeof repositoryAddress>, writeSecret: string): Promise<void> {
   let stage: PipelineStage = 'fetch';
   let archive: RepositoryArchive | undefined;
   const advance = async (next: PipelineStage, message: string) => {
     stage = next;
-    const { data, error } = await client.rpc('advance_analysis', { analysis_id: claim.id, attempt: claim.attempt, next_stage: next, status_message: message });
+    const { data, error } = await client.rpc('advance_analysis', { analysis_id: claim.id, attempt: claim.attempt, next_stage: next, status_message: message, write_secret: writeSecret });
     if (error) throw new Error('Could not record analysis progress.', { cause: error });
     return data;
   };
@@ -49,17 +52,16 @@ async function executeRun(client: SupabaseClient<Database>, claim: Claim, addres
     archive = await fetchRepository(address);
     if (!await advance('select', 'Selecting TypeScript and JavaScript source files.')) return;
     if (!await advance('parse', 'Resolving imports and recording coverage.')) return;
-    const parsed = await parseRepository(archive.directory, runnerConfigAdapter);
-    if (parsed.files.length > 10_000 || parsed.edges.length > 60_000) throw new Error('This repository exceeds the local limit of 10,000 source files or 60,000 imports.');
+    const parsed = await parseRepository(archive.directory, runnerConfigAdapter, { sourceFiles: 10_000, imports: 60_000 });
     const adapted = await analyzeFramework(archive.directory, parsed);
     const result = validateParseResult(adapted.graph);
     if (!await advance('store', `Storing ${result.files.length} files and ${result.edges.length} resolved imports.`)) return;
     const payload: Json = JSON.parse(JSON.stringify({ ...result, frameworkMetadata: adapted.metadata }));
-    const { error } = await client.rpc('publish_analysis', { analysis_id: claim.id, attempt: claim.attempt, commit_id: archive.commit, parsed: payload });
+    const { error } = await client.rpc('publish_analysis', { analysis_id: claim.id, attempt: claim.attempt, commit_id: archive.commit, parsed: payload, write_secret: writeSecret });
     if (error) throw new Error('Could not store the repository map.', { cause: error });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'The analysis failed unexpectedly.';
-    const { error: writeError } = await client.rpc('advance_analysis', { analysis_id: claim.id, attempt: claim.attempt, next_stage: stage, status_message: message, failed: true });
+    const { error: writeError } = await client.rpc('advance_analysis', { analysis_id: claim.id, attempt: claim.attempt, next_stage: stage, status_message: message, failed: true, write_secret: writeSecret });
     if (writeError) console.error('Could not record the failed analysis.', { analysisId: claim.id, stage, code: writeError.code });
   } finally { await archive?.dispose(); }
 }

@@ -31,6 +31,23 @@ do $$ declare relation text; begin
   end loop;
 end $$;
 
+create table private.pipeline_credentials (
+  credential_hash text primary key check (credential_hash ~ '^[a-f0-9]{64}$')
+);
+alter table private.pipeline_credentials enable row level security;
+revoke all on private.pipeline_credentials from public, anon, authenticated, cartograph_writer;
+
+create function private.require_pipeline_writer(supplied text) returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+  if supplied is null or supplied !~ '^[a-f0-9]{64}$' or not exists (
+    select 1 from private.pipeline_credentials
+    where credential_hash = encode(sha256(convert_to(supplied, 'UTF8')), 'hex')
+  ) then raise exception 'A parser-server credential is required.' using errcode = '42501'; end if;
+end $$;
+revoke all on function private.require_pipeline_writer(text) from public, anon, authenticated;
+grant execute on function private.require_pipeline_writer(text) to cartograph_writer;
+
 create function public.ensure_current_organization() returns void
 language plpgsql security definer set search_path = '' as $$
 declare organization text := auth.jwt()->'o'->>'id';
@@ -75,10 +92,11 @@ alter function public.restart_analysis(uuid) owner to cartograph_writer;
 revoke all on function public.restart_analysis(uuid) from public, anon;
 grant execute on function public.restart_analysis(uuid) to authenticated;
 
-create function public.advance_analysis(analysis_id uuid, attempt uuid, next_stage text, status_message text, failed boolean default false) returns boolean
+create function public.advance_analysis(analysis_id uuid, attempt uuid, next_stage text, status_message text, write_secret text, failed boolean default false) returns boolean
 language plpgsql security definer set search_path = '' as $$
 declare analysis public.analyses; stage_names text[] := array['fetch','select','parse','store'];
 begin
+  perform private.require_pipeline_writer(write_secret);
   select * into analysis from public.analyses where id = analysis_id and attempt_id = attempt and state in ('queued', 'running') for update;
   if not found then return false; end if;
   if not next_stage = any(stage_names) or array_position(stage_names, next_stage) < array_position(stage_names, analysis.stage)
@@ -87,14 +105,15 @@ begin
     stage = next_stage, message = left(status_message, 500), updated_at = clock_timestamp() where id = analysis_id;
   return true;
 end $$;
-alter function public.advance_analysis(uuid, uuid, text, text, boolean) owner to cartograph_writer;
-revoke all on function public.advance_analysis(uuid, uuid, text, text, boolean) from public, anon;
-grant execute on function public.advance_analysis(uuid, uuid, text, text, boolean) to authenticated;
+alter function public.advance_analysis(uuid, uuid, text, text, text, boolean) owner to cartograph_writer;
+revoke all on function public.advance_analysis(uuid, uuid, text, text, text, boolean) from public, anon;
+grant execute on function public.advance_analysis(uuid, uuid, text, text, text, boolean) to authenticated;
 
-create function public.publish_analysis(analysis_id uuid, attempt uuid, commit_id text, parsed jsonb) returns boolean
+create function public.publish_analysis(analysis_id uuid, attempt uuid, commit_id text, parsed jsonb, write_secret text) returns boolean
 language plpgsql security definer set search_path = '' as $$
 declare analysis public.analyses;
 begin
+  perform private.require_pipeline_writer(write_secret);
   select * into analysis from public.analyses where id = analysis_id and attempt_id = attempt for update;
   if not found then return false; end if;
   if analysis.state = 'completed' then return true; end if;
@@ -117,9 +136,9 @@ begin
     message = 'The repository map is ready.', updated_at = clock_timestamp() where id = analysis_id;
   return true;
 end $$;
-alter function public.publish_analysis(uuid, uuid, text, jsonb) owner to cartograph_writer;
-revoke all on function public.publish_analysis(uuid, uuid, text, jsonb) from public, anon;
-grant execute on function public.publish_analysis(uuid, uuid, text, jsonb) to authenticated;
+alter function public.publish_analysis(uuid, uuid, text, jsonb, text) owner to cartograph_writer;
+revoke all on function public.publish_analysis(uuid, uuid, text, jsonb, text) from public, anon;
+grant execute on function public.publish_analysis(uuid, uuid, text, jsonb, text) to authenticated;
 
 create function public.analysis_graph(analysis_id uuid) returns jsonb
 language sql security invoker set search_path = '' stable as $$
