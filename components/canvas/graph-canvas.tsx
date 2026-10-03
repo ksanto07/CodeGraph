@@ -90,7 +90,10 @@ function Canvas({ analysisId, attempt, ai, explanations, classifiedCount, files,
     });
   }, [selection, explanationMap, analysisId]);
   const classificationRun = useRef<{ cancelled: boolean } | null>(null);
-  const [classifying, setClassifying] = useState(false);
+  const context = JSON.stringify([analysisId, attempt, ai.classificationModel]);
+  const classificationContext = useRef<string | null>(null);
+  const [classificationPending, setClassificationPending] = useState<string | null>(null);
+  const classifying = classificationPending === context;
   const [classificationMessage, setClassificationMessage] = useState('');
   const unidentifiedFiles = JSON.stringify(files.filter(file => file.annotations.role === 'generic' || !file.annotations.role).map(file => file.id).sort());
   const classificationEnabled = Boolean(ai.classificationModel && ai.connectionStatus?.authorized && ai.connectionStatus.sharing && unidentifiedFiles !== '[]');
@@ -98,7 +101,7 @@ function Canvas({ analysisId, attempt, ai, explanations, classifiedCount, files,
     if (classificationRun.current || !classificationEnabled) return;
     const run = { cancelled: false };
     classificationRun.current = run;
-    setClassifying(true);
+    setClassificationPending(context);
     startTransition(async () => {
         let count = classifiedCount;
         let changed = false;
@@ -106,24 +109,37 @@ function Canvas({ analysisId, attempt, ai, explanations, classifiedCount, files,
         try {
           for (;;) {
             const result = await classifyAnalysisBatch(analysisId);
-            if (run.cancelled) break;
             const next = Object.keys(result.roles).length;
             changed ||= next > count;
+            if (run.cancelled || classificationContext.current !== context) break;
             if (result.status !== 'ok') { setClassificationMessage(result.message ?? 'Role classification could not complete.'); break; }
             setClassificationMessage(result.remaining ? `${result.remaining} unidentified files remaining.` : 'File roles updated.');
             if (!result.remaining) break;
             if (next <= count || result.processed === 0) { setClassificationMessage('Role classification made no progress. Click Classify files to try again.'); break; }
             count = next;
           }
-        } catch { if (!run.cancelled) setClassificationMessage('Role classification could not complete. Click Classify files to try again.'); }
+        } catch { if (!run.cancelled && classificationContext.current === context) setClassificationMessage('Role classification could not complete. Click Classify files to try again.'); }
         finally {
-          if (classificationRun.current === run) classificationRun.current = null;
-          setClassifying(false);
-          if (run.cancelled) setClassificationMessage('Classification stopped. Click Classify files to continue when available.');
-          if (changed && !run.cancelled) router.refresh();
+          const ownsPendingState = classificationRun.current === run;
+          if (ownsPendingState) classificationRun.current = null;
+          if (classificationContext.current === context) {
+            if (ownsPendingState) {
+              setClassificationPending(null);
+              if (run.cancelled) setClassificationMessage('Classification stopped. Click Classify files to continue when available.');
+            }
+            if (changed) router.refresh();
+          }
         }
     });
   };
+  useEffect(() => {
+    classificationContext.current = context;
+    return () => {
+      classificationContext.current = null;
+      if (classificationRun.current) classificationRun.current.cancelled = true;
+      classificationRun.current = null;
+    };
+  }, [context]);
   useEffect(() => () => { if (classificationRun.current) classificationRun.current.cancelled = true; }, [analysisId, attempt, ai.classificationModel, ai.connectionStatus?.authorized, ai.connectionStatus?.sharing, unidentifiedFiles]);
   const [hover, setHover] = useState<Selection>(null);
   const [reveal, setReveal] = useState<{ id: string; revision: number } | null>(null);
