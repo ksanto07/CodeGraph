@@ -47,12 +47,18 @@ try {
   const commonjs = await fixture({ 'packages/web/next.config.cjs': "module.exports = { basePath: '/manual' };" });
   assert(commonjs.metadata.routes.filter(route => route.file.startsWith('packages/web/')).every(route => route.path.startsWith('/manual/')));
   assert.equal(commonjs.metadata.routes.filter(route => route.file.startsWith('packages/web/')).length, 4);
+  const bracket = await fixture({ 'packages/web/next.config.cjs': "module['exports'] = { basePath: '/bracket' };" });
+  assert.equal(bracket.metadata.routes.filter(route => route.file.startsWith('packages/web/')).length, 4);
+  assert(bracket.metadata.routes.filter(route => route.file.startsWith('packages/web/')).every(route => route.path.startsWith('/bracket/')));
   for (const config of [
     'module.exports = buildConfig();',
     'module.exports = { basePath: process.env.PREFIX };',
     "const module = {}; module.exports = { basePath: '/fake' };",
     "function configure(module) { module.exports = { basePath: '/fake' }; }",
     "module.exports = { basePath: '/first' }; module.exports = { basePath: '/second' };",
+    "module.exports = { basePath: '/first' }; module['exports'] = { basePath: '/second' };",
+    "module.exports = { basePath: '/first' }; module['exports']['basePath'] = process.env.PREFIX;",
+    "module.exports = { basePath: '/first' }; module[dynamic] = { basePath: '/second' };",
     "module.exports = { basePath: '/first' }; module.exports.basePath = process.env.PREFIX;",
     "module.exports = { basePath: '/first' }; Object.assign(module.exports, { basePath: process.env.PREFIX });",
   ]) {
@@ -73,5 +79,15 @@ try {
   assert.equal(nest.metadata.framework, 'nestjs');
   assert.deepEqual(nest.metadata.routes.map(({ method, path }) => [method, path]), [['POST', '/items'], ['GET', '/items/:id']]);
   assert.equal(nest.graph.files.find(file => file.id === 'items.service.ts')?.annotations.role, 'service');
-  console.log('Adapter verification passed. Per-package monorepo roles and routes, package-scoped Nest invalidation, static CommonJS and ESM config, dynamic and shadowed config omission, and graph preservation.');
+  const shared = await fixture({
+    'packages/app/package.json': JSON.stringify({ dependencies: { '@nestjs/core': '*' } }),
+    'packages/app/main.ts': "import './app.module'; app.setGlobalPrefix('v1');",
+    'packages/app/app.module.ts': "export { Shared } from '../shared/shared.controller';",
+    'packages/shared/package.json': JSON.stringify({ dependencies: { '@nestjs/core': '*' } }),
+    'packages/shared/shared.controller.ts': "import { Controller, Get } from '@nestjs/common'; @Controller('shared') export class Shared { @Get() list() {} }",
+  });
+  assert(shared.graph.edges.some(edge => edge.from === 'packages/app/app.module.ts' && edge.to === 'packages/shared/shared.controller.ts'));
+  assert(!shared.metadata.routes.some(route => route.file === 'packages/shared/shared.controller.ts'));
+  assert(shared.metadata.routes.some(route => route.file === 'items.controller.ts' && route.path === '/items'));
+  console.log('Adapter verification passed. Per-package roles, reachable Nest controller invalidation, dot and bracket CommonJS exports, dynamic config omission, and graph preservation.');
 } finally { await rm(root, { recursive: true, force: true }); }

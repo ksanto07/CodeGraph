@@ -36,6 +36,17 @@ function nextPattern(segments: string[]): string | undefined {
   if (segments.some(segment => segment.startsWith('_') || segment.startsWith('@') || /^\(\./.test(segment))) return;
   return joinRoute(...segments.filter(segment => !/^\(.*\)$/.test(segment)));
 }
+function memberPath(node: Node): string | undefined {
+  if (Node.isIdentifier(node)) return node.getText();
+  if (Node.isPropertyAccessExpression(node)) {
+    const owner = memberPath(node.getExpression());
+    return owner === undefined ? undefined : owner + '.' + node.getName();
+  }
+  if (Node.isElementAccessExpression(node)) {
+    const owner = memberPath(node.getExpression());
+    return owner === undefined ? undefined : owner + '.' + (literal(node.getArgumentExpression()) ?? '*');
+  }
+}
 function basePath(source: SourceFile | undefined): string | undefined {
   if (!source) return '';
   const assignments = source.getExportAssignments();
@@ -43,12 +54,11 @@ function basePath(source: SourceFile | undefined): string | undefined {
   if (!object) {
     const writes = source.getDescendantsOfKind(SyntaxKind.BinaryExpression).filter(expression => {
       const left = expression.getLeft();
-      return Node.isPropertyAccessExpression(left) && left.getText() === 'module.exports';
+      return memberPath(left) === 'module.exports';
     });
     if (writes.length !== 1) return;
     const write = writes[0];
     const left = write.getLeft();
-    if (!Node.isPropertyAccessExpression(left)) return;
     const shadowed = source.getDescendantsOfKind(SyntaxKind.Identifier).some(identifier => {
       if (identifier.getText() !== 'module') return false;
       const parent = identifier.getParent();
@@ -57,10 +67,14 @@ function basePath(source: SourceFile | undefined): string | undefined {
         (Node.isImportSpecifier(parent) && (parent.getAliasNode() ?? parent.getNameNode()) === identifier);
     });
     const mutated = source.getDescendantsOfKind(SyntaxKind.BinaryExpression).some(expression => {
-      const target = expression.getLeft().getText();
-      return target.startsWith('module.exports.') || target.startsWith('module.exports[') || target.startsWith('exports.') || target.startsWith('exports[');
+      const target = memberPath(expression.getLeft());
+      return target?.startsWith('module.exports.') || target?.startsWith('exports.') || target === 'module.*';
     });
-    const otherAccess = source.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression).some(access => access.getText() === 'module.exports' && access !== left);
+    const otherAccess = source.getDescendants().some(access => {
+      if (!Node.isPropertyAccessExpression(access) && !Node.isElementAccessExpression(access)) return false;
+      const target = memberPath(access);
+      return (target === 'module.exports' || target === 'module.*') && access !== left;
+    });
     if (shadowed || mutated || otherAccess || write.getOperatorToken().getKind() !== SyntaxKind.EqualsToken || !Node.isExpressionStatement(write.getParent()) || write.getParent()?.getParent() !== source) return;
     object = write.getRight();
     if (!Node.isObjectLiteralExpression(object)) return;
@@ -89,6 +103,21 @@ export async function analyzeFramework(root: string, graph: ParseResult): Promis
     const text = sources.get(file.id)!.getFullText();
     return owner && packageFramework.get(owner) === 'nestjs' && (/\.(?:setGlobalPrefix|enableVersioning)\s*\(/.test(text) || text.includes('RouterModule.register'));
   }).map(file => owners.get(file.id)));
+  const configuredNestFiles = new Set(graph.files.filter(file => configuredNestPackages.has(owners.get(file.id))).map(file => file.id));
+  const imports = new Map<string, string[]>();
+  for (const edge of graph.edges) {
+    const targets = imports.get(edge.from) ?? [];
+    targets.push(edge.to);
+    imports.set(edge.from, targets);
+  }
+  const pending = [...configuredNestFiles];
+  while (pending.length) {
+    for (const target of imports.get(pending.pop()!) ?? []) {
+      if (configuredNestFiles.has(target)) continue;
+      configuredNestFiles.add(target);
+      pending.push(target);
+    }
+  }
   const routes: FrameworkRoute[] = [];
   const files = graph.files.map(file => {
     const source = sources.get(file.id)!;
@@ -119,7 +148,7 @@ export async function analyzeFramework(root: string, graph: ParseResult): Promis
       else if (/(?:^|\/)components\//.test(relative) || /\.[jt]sx$/.test(relative)) role = 'component';
     } else if (framework === 'nestjs') {
       role = /\.(controller|service|module|entity)\.[jt]s$/.exec(relative)?.[1] ?? role;
-      if (role === 'controller' && !configuredNestPackages.has(owner)) {
+      if (role === 'controller' && !configuredNestFiles.has(file.id)) {
         const imported = new Map<string, string>();
         source.getImportDeclarations().filter(item => item.getModuleSpecifierValue() === '@nestjs/common').forEach(item => item.getNamedImports().forEach(name => imported.set(name.getAliasNode()?.getText() ?? name.getName(), name.getName())));
         for (const controller of source.getClasses()) {
