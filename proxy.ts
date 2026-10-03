@@ -2,7 +2,7 @@ import { type NextRequest, type NextFetchEvent } from "next/server";
 import { readEnvironment } from "@/lib/env";
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
-const isPublicRoute = createRouteMatcher(["/sign-in(.*)", "/sign-up(.*)", "/__clerk(.*)", "/api/agent/jwks", "/api/agent/tools", "/api/agent/model"]);
+const isPublicRoute = createRouteMatcher(["/", "/sign-in(.*)", "/sign-up(.*)", "/__clerk(.*)", "/api/agent/jwks", "/api/agent/tools", "/api/agent/model"]);
 
 const authenticatedProxy = clerkMiddleware(async (auth, request) => {
   if (!isPublicRoute(request)) {

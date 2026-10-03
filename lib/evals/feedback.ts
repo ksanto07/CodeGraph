@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Client } from 'langsmith';
 import { getCurrentRunTree } from 'langsmith/traceable';
-import type { PathEvaluation } from './paths.ts';
+import { pathEvaluationKey, type PathEvaluation } from './paths.ts';
 
 export type LivePathEvaluation = PathEvaluation & {
   feedback: 'local_only' | 'recorded' | 'delivery_failed';
@@ -32,9 +32,11 @@ export async function recordPathEvaluation(evaluation: PathEvaluation, tracing: 
       const hex = createHash('sha256').update(`${tree.id}:${evaluation.version}`).digest('hex');
       const feedbackId = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
       const common = {
-        runId: tree.id, feedbackId, key: 'invented_path_free', score: evaluation.score,
+        runId: tree.id, feedbackId, key: pathEvaluationKey,
+        ...(evaluation.score === null ? { value: 'ambiguous' } : { score: evaluation.score }),
         comment: JSON.stringify({ version: evaluation.version, checked: evaluation.checked.length,
-          inventedCount: evaluation.invented.length, invented: evaluation.invented.slice(0, 20) }),
+          inventedCount: evaluation.invented.length, invented: evaluation.invented.slice(0, 20),
+          ambiguousCount: evaluation.ambiguous.length, ambiguous: evaluation.ambiguous.slice(0, 20) }),
       };
       if (tree.address) await tree.client.createFeedback({ ...common, address: tree.address });
       else {

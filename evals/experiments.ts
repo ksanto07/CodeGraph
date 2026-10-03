@@ -6,7 +6,7 @@ import { runAI, tracingConfigured, type AICache, type AIRequest } from '../lib/a
 import { accessTokenCredential, getLocalChatGPTStatus, listLocalChatGPTModels } from '../lib/ai/local-auth.ts';
 import { classificationInstructions, classificationPromptVersion, explanationContext, explanationInput,
   explanationInstructions, explanationPaths, explanationPromptVersion, readSemanticRole, type ExplanationContext } from '../lib/ai/context.ts';
-import { evaluatePaths } from '../lib/evals/paths.ts';
+import { evaluatePaths, pathEvaluationKey } from '../lib/evals/paths.ts';
 import { readSpecificityJudgment } from '../lib/evals/judge.ts';
 import { prepareHeldOutDataset, type HeldOutDataset } from '../lib/evals/dataset.ts';
 import type { FileNode, Edge } from '../lib/parser/types.ts';
@@ -181,7 +181,9 @@ export async function evaluatePrompts(userId: string, filename: string) {
       evaluators: [({ inputs, outputs }: { inputs: Record<string, unknown>; outputs: Record<string, unknown> }) => {
         const paths = explanationPaths(explanationInput(contextFrom(inputs.context)));
         const scored = evaluatePaths(typeof outputs.body === 'string' ? outputs.body : '', paths);
-        return { key: 'invented_path_free', score: outputs.error ? 0 : scored.score, comment: JSON.stringify(scored.invented) };
+        return { key: pathEvaluationKey,
+          ...(outputs.error ? { score: 0 } : scored.score === null ? { value: 'ambiguous' } : { score: scored.score }),
+          comment: JSON.stringify({ version: scored.version, invented: scored.invented, ambiguous: scored.ambiguous }) };
       }, async ({ inputs, outputs }: { inputs: Record<string, unknown>; outputs: Record<string, unknown> }) => {
         if (outputs.error || typeof outputs.body !== 'string' || !outputs.body) return { key: 'specificity_soft', value: 'generation_failed', comment: 'Generation failed; no model judgment was performed.' };
         const context = explanationInput(contextFrom(inputs.context));
@@ -198,9 +200,14 @@ export async function evaluatePrompts(userId: string, filename: string) {
     const rows = results.results;
     if (rows.length !== dataset.examples.length) throw new Error('Prompt evaluation returned an incomplete result set.');
     const scores = rows.flatMap(row => row.evaluationResults.results.filter(result => result.key === 'specificity_soft' && typeof result.score === 'number').map(result => Number(result.score)));
+    const pathResults = rows.flatMap(row => row.evaluationResults.results.filter(result => result.key === pathEvaluationKey));
+    const pathScored = pathResults.filter(result => typeof result.score === 'number').length;
     summaries.push({ version: prompt.version, experiment: results.experimentName,
       url: await experimentUrl(client, results.experimentName), examples: dataset.examples.length,
-      pathPasses: rows.filter(row => row.evaluationResults.results.some(result => result.key === 'invented_path_free' && result.score === 1)).length,
+      pathMetric: pathEvaluationKey, pathScored, pathCoverage: pathScored / dataset.examples.length,
+      pathPasses: pathResults.filter(result => result.score === 1).length,
+      pathFailures: pathResults.filter(result => result.score === 0).length,
+      pathAmbiguous: pathResults.filter(result => result.value === 'ambiguous').length,
       judgeScored: scores.length, judgeFailed: dataset.examples.length - scores.length,
       generationFailures: rows.filter(row => row.run.outputs?.error || row.run.error).length,
       subjectiveSpecificityMean: scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : null });
@@ -229,12 +236,16 @@ export async function evaluateRecent(since: Date, limit = 50) {
     try {
       const score = evaluatePaths(outputs.body, strings(request.allowedPaths));
       const feedback = outputs.evaluation && typeof outputs.evaluation === 'object' ? record(outputs.evaluation).feedback : 'unreported';
-      rows.push({ id: run.id, status: 'scored', score: score.score, invented: score.invented,
+      rows.push({ id: run.id, status: score.score === null ? 'unscored' : 'scored', version: score.version, score: score.score,
+        reason: score.score === null ? 'Ambiguous unframed path candidates.' : undefined,
+        invented: score.invented, ambiguous: score.ambiguous,
         checked: score.checked.length, feedback, url: await client.getRunUrl({ run }) });
     } catch { rows.push({ id: run.id, status: 'unscored', reason: 'Invalid path evidence or evaluator delivery metadata.' }); }
   }
   const scored = rows.filter(row => row.status === 'scored');
-  return { examinedLimit: limit, rows, scored: scored.length, unscored: rows.length - scored.length,
-    deliveryFailed: scored.filter(row => row.feedback === 'delivery_failed').length,
+  return { pathMetric: pathEvaluationKey, examinedLimit: limit, rows, scored: scored.length, unscored: rows.length - scored.length,
+    ambiguous: rows.filter(row => row.score === null && row.ambiguous?.length).length,
+    coverage: rows.length ? scored.length / rows.length : null,
+    deliveryFailed: rows.filter(row => row.feedback === 'delivery_failed').length,
     score: scored.length ? scored.filter(row => row.score === 1).length / scored.length : null };
 }

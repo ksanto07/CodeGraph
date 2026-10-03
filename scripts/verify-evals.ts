@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { evaluatePaths, pathGrammarLimitations, type PathMention } from '../lib/evals/paths.ts';
 
-function check(body: string, shown: readonly string[], expected: readonly string[], invented: readonly string[] = []): void {
+function check(body: string, shown: readonly string[], expected: readonly string[], invented: readonly string[] = [], ambiguous: readonly string[] = []): void {
   const result = evaluatePaths(body, shown);
   assert.deepEqual(result.checked.map(item => item.raw), expected, body);
   assert.deepEqual(result.invented.map(item => item.raw), invented, body);
-  assert.equal(result.score, invented.length ? 0 : 1);
+  assert.deepEqual(result.ambiguous.map(item => item.raw), ambiguous, body);
+  assert.equal(result.score, invented.length ? 0 : ambiguous.length ? null : 1);
   for (const mention of result.checked) assert.equal(body.slice(mention.start, mention.end), mention.raw);
 }
 
@@ -28,9 +29,20 @@ check('`src/a.ts.`', ['src/a.ts.'], ['src/a.ts.']);
 check('src/a.ts.', ['src/a.ts.'], ['src/a.ts'], ['src/a.ts']);
 check('``src/has`tick.ts`` and `src/[id]/page.tsx`', ['src/has`tick.ts', 'src/[id]/page.tsx'], ['src/has`tick.ts', 'src/[id]/page.tsx']);
 check('`src/a%20b.ts` "src/a b.ts"', ['src/a b.ts'], ['src/a%20b.ts', 'src/a b.ts'], ['src/a%20b.ts']);
-check('src/my file.ts', ['src/my file.ts'], ['src/my', 'file.ts'], ['src/my', 'file.ts']);
-check('This uses e.g. and config/service.', [], ['e.g', 'config/service'], ['e.g', 'config/service']);
+check('src/my file.ts', ['src/my file.ts'], ['src/my', 'file.ts'], ['file.ts'], ['src/my']);
+check('This uses e.g. and config/service.', [], ['e.g', 'config/service'], [], ['e.g', 'config/service']);
 check("It isn't a new path; don't guess.", [], []);
+check('React/TypeScript controller/module create/update controller/module/test DTO/entity context/state', [],
+  ['React/TypeScript', 'controller/module', 'create/update', 'controller/module/test', 'DTO/entity', 'context/state'], [],
+  ['React/TypeScript', 'controller/module', 'create/update', 'controller/module/test', 'DTO/entity', 'context/state']);
+check('config/service', [], ['config/service'], [], ['config/service']);
+check('config/service', ['config/service'], ['config/service']);
+check('`config/service` ./config/service /config/service', [],
+  ['config/service', './config/service', '/config/service'], ['config/service', './config/service', '/config/service']);
+check('context/state `missing/path`', [], ['context/state', 'missing/path'], ['missing/path'], ['context/state']);
+check('a.c', [], ['a.c'], [], ['a.c']);
+check('a.c', ['a.c'], ['a.c']);
+check('Next.js', [], ['Next.js'], ['Next.js']);
 check('C:\\src\\a.ts:22', [], ['C:\\src\\a.ts'], ['C:\\src\\a.ts']);
 check('```ts\nsrc/a.ts\nsrc/missing.ts\n```', shown, ['src/a.ts', 'src/missing.ts'], ['src/missing.ts']);
 const text = '😀 `src/é.ts` followed by src/a.ts.';

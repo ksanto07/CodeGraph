@@ -109,7 +109,7 @@ try {
   assert.deepEqual(feedback.map(item => item.session_id), [sessionId, sessionId]);
   assert.deepEqual(feedback.map(item => item.run_id), [live.evaluation?.runId, cached.evaluation?.runId]);
   assert.notEqual(feedback[0].run_id, feedback[1].run_id);
-  assert(feedback.every(item => item.score === 0 && item.key === 'invented_path_free'));
+  assert(feedback.every(item => item.score === 0 && item.key === 'invented_path_free_v2'));
   const explanationRuns = requests.filter(item => item.method === 'POST' && new URL(item.url).pathname === '/runs')
     .map(item => object(item.body)).filter(run => run.name === 'explain-file');
   assert.equal(explanationRuns.length, 2);
@@ -128,6 +128,19 @@ try {
   assert.equal(passingFeedback.score, 1);
   assert.equal(passingFeedback.run_id, fullyShown.evaluation?.runId);
   assert.equal(passingFeedback.session_id, sessionId);
+  stored.set('ambiguous-key', 'Uses React/TypeScript with `src/allowed.ts`.');
+  const ambiguous = await invoke({ ...request, key: 'ambiguous-key' });
+  assert.equal(ambiguous.cached, true);
+  assert.equal(ambiguous.evaluation?.score, null);
+  assert.equal(ambiguous.evaluation?.feedback, 'recorded');
+  assert.deepEqual(ambiguous.evaluation?.ambiguous.map(mention => mention.raw), ['React/TypeScript']);
+  const ambiguousFeedback = object(requests.filter(item => item.url === `${endpoint}/feedback`).at(-1)?.body);
+  assert.equal(ambiguousFeedback.key, 'invented_path_free_v2');
+  assert.equal(ambiguousFeedback.value, 'ambiguous');
+  assert(!('score' in ambiguousFeedback));
+  const ambiguityDetails = object(JSON.parse(String(ambiguousFeedback.comment)));
+  assert.equal(ambiguityDetails.ambiguousCount, 1);
+  assert.equal(modelCalls, 1);
   rejectFeedback = true;
   const unavailable = await invoke(request);
   assert.equal(unavailable.body, canonical);

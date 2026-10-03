@@ -13,10 +13,9 @@ const dateFormat = new Intl.DateTimeFormat("en", {
   timeZone: "UTC",
 });
 
-export default async function WorkspacePage({ searchParams }: { searchParams: Promise<{ repository?: string }> }) {
+export async function WorkspaceDashboard({ repository }: { repository?: string }) {
   const { orgId, has } = await requireWorkspace();
   const analyses = await listAnalyses();
-  const { repository } = await searchParams;
 
   return (
     <main className="workspace-content">

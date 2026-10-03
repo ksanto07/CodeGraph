@@ -76,6 +76,9 @@ h1 { font-size: 17px; font-weight: 600; }
 h2 { font-size: 14px; font-weight: 600; }
 code { font-family: var(--font-geist-mono), monospace; font-size: 12px; }
 .app-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -86,6 +89,10 @@ code { font-family: var(--font-geist-mono), monospace; font-size: 12px; }
   gap: 16px;
 }
 .app-name { font-size: 14px; font-weight: 650; text-decoration: none; }
+.header-controls { display: flex; align-items: center; gap: 18px; }
+.header-controls > a { font-size: 12px; text-decoration: none; white-space: nowrap; }
+.repository-continuation { width: 100%; max-width: 480px; display: grid; gap: 16px; }
+.repository-continuation p { max-width: 46ch; overflow-wrap: anywhere; }
 .theme-control, .team-controls { display: flex; align-items: center; gap: 10px; }
 .theme-control > span { color: var(--muted); font-size: 12px; }
 .workspace-shell { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: calc(100vh - 48px); }
