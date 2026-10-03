@@ -1,0 +1,15 @@
+{
+  "name": "cartograph-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "mda build .",
+    "dev": "mda dev ."
+  },
+  "dependencies": {
+    "langchain": "1.5.12",
+    "managed-deepagents": "0.8.5",
+    "zod": "4.6.2"
+  }
+}

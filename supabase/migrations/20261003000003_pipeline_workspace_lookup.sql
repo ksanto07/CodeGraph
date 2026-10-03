@@ -1,4 +1,6 @@
 begin;
+grant cartograph_writer to postgres;
+grant usage, create on schema public to cartograph_writer;
 create or replace function private.current_pipeline_organization() returns text
 language sql security definer stable set search_path = '' as $$
   select auth.jwt()->'o'->>'id';
@@ -31,4 +33,6 @@ alter function public.claim_repository(text) owner to cartograph_writer;
 revoke all on function public.claim_repository(text) from public, anon;
 grant execute on function public.claim_repository(text) to authenticated;
 
+revoke create on schema public from cartograph_writer;
+revoke cartograph_writer from postgres;
 commit;

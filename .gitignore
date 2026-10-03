@@ -2,6 +2,8 @@
 
 # dependencies
 /node_modules
+/cartograph-agent/node_modules/
+/cartograph-agent/.mda/
 /.pnp
 .pnp.*
 .yarn/*
