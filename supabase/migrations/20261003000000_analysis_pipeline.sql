@@ -1,9 +1,9 @@
 begin;
 
 create role cartograph_writer nologin nobypassrls;
+grant cartograph_writer to postgres;
 grant usage, create on schema public to cartograph_writer;
-grant usage on schema private, auth to cartograph_writer;
-grant execute on function auth.jwt() to cartograph_writer;
+grant usage on schema private to cartograph_writer;
 
 alter table public.projects add constraint projects_repository_unique unique (organization_id, repository);
 alter table public.analyses
@@ -25,9 +25,16 @@ create unique index edges_unique_import on public.edges (analysis_id, source_fil
 grant select, insert, update, delete on public.projects, public.analyses, public.files, public.edges to cartograph_writer;
 grant usage on type public.analysis_state to cartograph_writer;
 
+create or replace function private.current_pipeline_organization() returns text
+language sql security definer stable set search_path = '' as $$
+  select auth.jwt()->'o'->>'id';
+$$;
+revoke all on function private.current_pipeline_organization() from public, anon, authenticated;
+grant execute on function private.current_pipeline_organization() to cartograph_writer;
+
 do $$ declare relation text; begin
   foreach relation in array array['projects', 'analyses', 'files', 'edges'] loop
-    execute format('create policy pipeline_organization on public.%I for all to cartograph_writer using (organization_id = (select auth.jwt()->''o''->>''id'')) with check (organization_id = (select auth.jwt()->''o''->>''id''))', relation);
+    execute format('create policy pipeline_organization on public.%I for all to cartograph_writer using (organization_id = (select private.current_pipeline_organization())) with check (organization_id = (select private.current_pipeline_organization()))', relation);
   end loop;
 end $$;
 
@@ -60,7 +67,7 @@ grant execute on function public.ensure_current_organization() to authenticated,
 
 create function public.claim_repository(repository_slug text) returns jsonb
 language plpgsql security definer set search_path = '' as $$
-declare organization text := auth.jwt()->'o'->>'id'; project uuid; analysis public.analyses; started boolean := false;
+declare organization text := private.current_pipeline_organization(); project uuid; analysis public.analyses; started boolean := false;
 begin
   if repository_slug !~ '^[a-z0-9][a-z0-9-]{0,38}/[a-z0-9_.-]+$' then raise exception 'Invalid repository.'; end if;
   perform public.ensure_current_organization();
@@ -177,4 +184,5 @@ create policy analysis_progress_subscribe on realtime.messages for select to aut
   )
 );
 revoke create on schema public from cartograph_writer;
+revoke cartograph_writer from postgres;
 commit;

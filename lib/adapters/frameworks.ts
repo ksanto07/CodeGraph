@@ -73,7 +73,8 @@ function basePath(source: SourceFile | undefined): string | undefined {
     const otherAccess = source.getDescendants().some(access => {
       if (!Node.isPropertyAccessExpression(access) && !Node.isElementAccessExpression(access)) return false;
       const target = memberPath(access);
-      return (target === 'module.exports' || target === 'module.*') && access !== left;
+      if (target !== 'module.exports' && target !== 'module.*') return false;
+      return access !== left && !Node.isExpressionStatement(access.getParent());
     });
     if (shadowed || mutated || otherAccess || write.getOperatorToken().getKind() !== SyntaxKind.EqualsToken || !Node.isExpressionStatement(write.getParent()) || write.getParent()?.getParent() !== source) return;
     object = write.getRight();

@@ -50,6 +50,9 @@ try {
   const bracket = await fixture({ 'packages/web/next.config.cjs': "module['exports'] = { basePath: '/bracket' };" });
   assert.equal(bracket.metadata.routes.filter(route => route.file.startsWith('packages/web/')).length, 4);
   assert(bracket.metadata.routes.filter(route => route.file.startsWith('packages/web/')).every(route => route.path.startsWith('/bracket/')));
+  const read = await fixture({ 'packages/web/next.config.cjs': "module.exports = { basePath: '/read' }; module[key]; module.exports;" });
+  assert.equal(read.metadata.routes.filter(route => route.file.startsWith('packages/web/')).length, 4);
+  assert(read.metadata.routes.filter(route => route.file.startsWith('packages/web/')).every(route => route.path.startsWith('/read/')));
   for (const config of [
     'module.exports = buildConfig();',
     'module.exports = { basePath: process.env.PREFIX };',
@@ -61,6 +64,8 @@ try {
     "module.exports = { basePath: '/first' }; module[dynamic] = { basePath: '/second' };",
     "module.exports = { basePath: '/first' }; module.exports.basePath = process.env.PREFIX;",
     "module.exports = { basePath: '/first' }; Object.assign(module.exports, { basePath: process.env.PREFIX });",
+    "module.exports = { basePath: '/first' }; Object.assign(module[key], { basePath: process.env.PREFIX });",
+    "module.exports = { basePath: '/first' }; const alias = module[key]; alias.basePath = process.env.PREFIX;",
   ]) {
     const result = await fixture({ 'packages/web/next.config.cjs': config });
     assert(!result.metadata.routes.some(route => route.file.startsWith('packages/web/')), config);
