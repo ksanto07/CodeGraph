@@ -8,6 +8,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AIConnection } from '../lib/ai/client.ts';
+import { ChatProjection, nativeRunLocation, readServerEvents } from '../lib/agent/stream.ts';
 const live = process.argv.includes('--live');
 const root = fileURLToPath(new URL('..', import.meta.url));
 let connection: AIConnection | undefined;
@@ -155,6 +156,7 @@ try {
   const questions = live ? ['Where does authentication live in this repository graph?', 'What is affected if lib/auth.ts changes?', 'Is this code any good?'] : ['Summarize this graph.'];
   const conversations: { question: string; answer: string; successfulGraphLookups: number; currentTurnEvidence: boolean; exactPaths: unknown; heuristicFlags: string[]; lookups: typeof factualLookups }[] = [];
   let events = '';
+  const nativeCompletions: { status: 'success'; endEvent: boolean }[] = [];
   for (const [index, question] of questions.entries()) {
     if (index > 0) {
       assert.equal((await api('/connectors/cartograph/revoke', 'POST', { runHandle: handle })).ok, true);
@@ -164,6 +166,14 @@ try {
     const before = toolCalls; const lookupStart = factualLookups.length;
     const stream = await api(`/threads/${threadId}/runs/stream`, 'POST', { assistant_id: 'cartograph', input: { messages: [{ role: 'user', content: question }] }, context: { runHandle: handle }, stream_mode: ['messages', 'updates', 'custom'], multitask_strategy: 'reject', on_disconnect: 'cancel' });
     assert.equal(stream.ok, true); const turnEvents = await stream.text(); events += turnEvents;
+    const location = nativeRunLocation(stream.headers.get('content-location'), `http://127.0.0.1:${nativePort}`, threadId);
+    const completed = await api(new URL(location.url).pathname);
+    assert.equal(completed.ok, true);
+    const projection = new ChatProjection();
+    for await (const event of readServerEvents(new Response(turnEvents).body!)) projection.accept(event);
+    assert.deepEqual(projection.complete(await completed.json(), location.run, threadId), { type: 'done' });
+    assert.equal((await api(new URL(location.url).pathname, 'GET', undefined, foreign)).ok, false);
+    nativeCompletions.push({ status: 'success', endEvent: turnEvents.includes('event: end') });
     assert.doesNotMatch(turnEvents, /event: error/); assert.equal(turnEvents.includes(secret), false);
     let answer = '';
     for (const frame of turnEvents.split('\n\n')) {
@@ -195,7 +205,7 @@ try {
     assert.ok(traces.length > 0, 'Native traces must reach the local synthetic collector.');
     assert.equal(traces.some(trace => trace.includes(secret) || trace.includes(bearer)), false);
   }
-  console.log(JSON.stringify({ mode: live ? 'live-fixture-evaluation' : 'synthetic-native-verification', native: true, fullApplicationEndToEnd: false, fixture: live ? 'Five parsed fixture files, graph facts only; no source bodies sent.' : null, model: live ? model : null, modelCalls, toolCalls, traceBatches: live ? null : traces.length, secretAbsent: true, heuristicNotice: 'Word flags are inspection aids, not scores or verified failures.', conversations, ...(!live ? { events: events.slice(0, 6000) } : {}) }, null, 2));
+  console.log(JSON.stringify({ mode: live ? 'live-fixture-evaluation' : 'synthetic-native-verification', native: true, fullApplicationEndToEnd: false, nativeCompletions, fixture: live ? 'Five parsed fixture files, graph facts only; no source bodies sent.' : null, model: live ? model : null, modelCalls, toolCalls, traceBatches: live ? null : traces.length, secretAbsent: true, heuristicNotice: 'Word flags are inspection aids, not scores or verified failures.', conversations, ...(!live ? { events: events.slice(0, 6000) } : {}) }, null, 2));
 } finally {
   if (live) await writeFile('/tmp/codegraph-run/native-agent-live-diagnostics.json', JSON.stringify({ roundEvidence, upstreamEvidence }, null, 2));
   if (child.pid) {

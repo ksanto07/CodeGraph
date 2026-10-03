@@ -76,5 +76,47 @@ try {
   fixture.state = { ...fixture.state, commit_sha: 'b'.repeat(40) };
   await assert.rejects(resolveQuestion(changed.toolBearer), /no longer authorized/);
   changed.done();
-  console.log('Actual broker reserves concurrent questions, keeps cleanup bound to its run, and revokes access after membership or graph changes.');
+  fixture.state = { ...fixture.state, commit_sha: fixture.view.commit };
+  let oldestThread = '';
+  let newestThread = '';
+  for (let index = 0; index < 70; index++) {
+    const finished = await beginQuestion(analysis);
+    if (index === 0) oldestThread = finished.thread;
+    newestThread = finished.thread;
+    finished.done();
+  }
+  assert.equal(globalThis.cartographAgentBroker?.conversations.size, 64);
+  await assert.rejects(beginQuestion(analysis, oldestThread), /conversation has expired/);
+  const reused = await beginQuestion(analysis, newestThread);
+  assert.equal(reused.thread, newestThread);
+  reused.done();
+  fixture.workspace = { ...fixture.workspace, userId: 'user_other', sessionId: 'sess_other' };
+  await assert.rejects(beginQuestion(analysis, newestThread), /no longer belongs/);
+  const admitted = await beginQuestion(analysis);
+  assert.equal((await resolveQuestion(admitted.toolBearer)).scope.user, 'user_other');
+  admitted.done();
+  fixture.workspace = { ...fixture.workspace, userId: 'user_fixture', sessionId: 'sess_fixture' };
+  const active: Awaited<ReturnType<typeof beginQuestion>>[] = [];
+  try {
+    for (let index = 0; index < 64; index++) active.push(await beginQuestion(analysis));
+    assert.equal(globalThis.cartographAgentBroker?.conversations.size, 64);
+    await assert.rejects(beginQuestion(analysis), /All question slots are occupied/);
+    assert.equal((await resolveQuestion(active[0].toolBearer)).scope.analysis, analysis);
+    active[1].done();
+    const replacement = await beginQuestion(analysis);
+    active.push(replacement);
+    assert.equal(globalThis.cartographAgentBroker?.conversations.size, 64);
+    assert.equal((await resolveQuestion(active[0].toolBearer)).scope.analysis, analysis);
+    await assert.rejects(beginQuestion(analysis, active[0].thread), /Wait for the current answer/);
+  } finally { for (const question of active) question.done(); }
+  const actualNow = Date.now;
+  try {
+    const future = actualNow() + 31 * 60_000;
+    Date.now = () => future;
+    await assert.rejects(beginQuestion(analysis, active[0].thread), /conversation has expired/);
+    const afterExpiry = await beginQuestion(analysis);
+    assert.equal(globalThis.cartographAgentBroker?.conversations.size, 1);
+    afterExpiry.done();
+  } finally { Date.now = actualNow; }
+  console.log('Actual broker evicts idle history after 70 finished questions, preserves 64 active slots, ownership and stale cleanup, and revokes access after membership or graph changes.');
 } finally { hooks.deregister(); }

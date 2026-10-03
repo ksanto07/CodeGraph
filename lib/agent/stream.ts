@@ -1,7 +1,20 @@
 export interface ServerEvent { event: string; data: unknown }
 
+export function nativeRunLocation(location: string | null, origin: string, thread: string): { url: string; run: string } {
+  if (!location) throw new Error('The agent did not identify its run.');
+  const url = new URL(location, origin);
+  const route = /^\/threads\/([a-f0-9-]{36})\/runs\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/i.exec(url.pathname);
+  if (url.origin !== origin || url.username || url.password || url.search || url.hash ||
+    !route || route[1] !== thread || (location !== url.pathname && location !== url.href)) {
+    throw new Error('The agent run location is outside this conversation.');
+  }
+  return { url: url.href, run: route[2] };
+}
+
 export async function* readServerEvents(body: ReadableStream<Uint8Array>, signal?: AbortSignal): AsyncGenerator<ServerEvent> {
   const reader = body.getReader();
+  const abort = () => { void reader.cancel().catch(() => undefined); };
+  signal?.addEventListener('abort', abort, { once: true });
   const decoder = new TextDecoder();
   let pending = '';
   function parse(frame: string): ServerEvent | null {
@@ -18,6 +31,7 @@ export async function* readServerEvents(body: ReadableStream<Uint8Array>, signal
     for (;;) {
       signal?.throwIfAborted();
       const next = await reader.read();
+      signal?.throwIfAborted();
       pending += decoder.decode(next.value, { stream: !next.done });
       pending = pending.replaceAll('\r\n', '\n');
       if (pending.length > 2_000_000) throw new Error('The agent stream frame is too large.');
@@ -30,7 +44,7 @@ export async function* readServerEvents(body: ReadableStream<Uint8Array>, signal
       if (next.done) break;
     }
     if (pending.trim()) throw new Error('The agent stream ended with an incomplete event.');
-  } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
+  } finally { signal?.removeEventListener('abort', abort); await reader.cancel().catch(() => undefined); reader.releaseLock(); }
 }
 
 export type ChatEvent =
@@ -48,6 +62,13 @@ export class ChatProjection {
   #answered = false;
 
   get evidence(): boolean { return this.#lookups > 0 && this.#answered; }
+
+  complete(run: unknown, runId: string, thread: string): ChatEvent {
+    if (!this.evidence || !record(run) || run.run_id !== runId || run.thread_id !== thread || run.status !== 'success') {
+      throw new Error('The agent did not finish an authorized answer backed by a graph lookup.');
+    }
+    return { type: 'done' };
+  }
 
   accept(event: ServerEvent): ChatEvent[] {
     if (event.event === 'error') throw new Error('The agent could not finish its answer.');

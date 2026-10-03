@@ -28,9 +28,14 @@ Open a completed analysis and switch the whole right pane to **Ask**. Selected
 files or folders become question context. Each successful graph lookup appears
 before its answer. Switching back to **Details** preserves the selection. Stop
 or exit Ask to cancel an active request. Use **New conversation** after a server
-restart or an expired conversation.
+restart or an expired conversation. The app retains at most 64 conversations;
+starting another can evict the oldest idle conversation, while active answers
+keep their slots.
 
-The native runtime owns threads and streaming. The app issues a separate opaque
+The native runtime owns threads and streaming. A clean stream close does not
+mark an answer complete. The relay checks the same authenticated native run
+once after the stream closes and requires success plus graph lookup evidence;
+interrupted runs retain a visible error. The app issues a separate opaque
 principal for each thread and a five-minute signed delegation for one analysis.
 The broker retains a Clerk-backed database client; every lookup checks the live
 session, organization membership and current analysis attempt/commit. Existing

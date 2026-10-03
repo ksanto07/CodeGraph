@@ -47,7 +47,14 @@ export async function beginQuestion(analysis: string, thread?: string, selection
   }
   if (conversation?.activeRun) throw new Error('Wait for the current answer or cancel it.');
   if (!conversation) {
-    if (broker.conversations.size >= 64) throw new Error('All question slots are occupied. Try again later.');
+    if (broker.conversations.size >= 64) {
+      let oldestIdle: Conversation | undefined;
+      for (const entry of broker.conversations.values()) {
+        if (!entry.activeRun && (!oldestIdle || entry.expires < oldestIdle.expires)) oldestIdle = entry;
+      }
+      if (!oldestIdle) throw new Error('All question slots are occupied. Try again later.');
+      broker.conversations.delete(oldestIdle.thread);
+    }
     conversation = { analysis, organization: workspace.orgId, user: workspace.userId, attempt: view.attempt,
       commit: view.commit, thread: randomUUID(), principal: randomBytes(32).toString('hex'), expires: Date.now() + 30 * 60_000, activeRun: null, opened: false };
     broker.conversations.set(conversation.thread, conversation);

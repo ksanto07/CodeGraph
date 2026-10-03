@@ -1,6 +1,6 @@
 import 'server-only';
 import { beginQuestion } from './server';
-import { ChatProjection, readServerEvents, type ChatEvent } from './stream';
+import { ChatProjection, nativeRunLocation, readServerEvents, type ChatEvent } from './stream';
 import { readLimitedJSON } from './http';
 import { requireLocalAIRequest } from '../ai/local-request';
 
@@ -55,6 +55,7 @@ export async function relayQuestion(request: Request): Promise<Response> {
       input: { messages: [{ role: 'user', content: input.message + selected }] }, context: { runHandle: authority.runHandle },
       stream_mode: ['messages', 'custom'], multitask_strategy: 'reject', on_disconnect: 'cancel' });
     if (!native.ok || !native.body) throw new Error('The agent is unreachable. The repository map is still available.');
+    const completion = nativeRunLocation(native.headers.get('content-location'), origin, authority.thread);
     const projection = new ChatProjection();
     const iterator = readServerEvents(native.body, signal);
     const encoder = new TextEncoder();
@@ -64,8 +65,12 @@ export async function relayQuestion(request: Request): Promise<Response> {
         send({ type: 'thread', thread: authority.thread });
         try {
           for await (const event of iterator) for (const projected of projection.accept(event)) send(projected);
-          if (!projection.evidence) throw new Error('The agent did not finish an answer backed by a graph lookup.');
-          send({ type: 'done' });
+          signal.throwIfAborted();
+          const completed = await fetch(completion.url, { headers, signal, redirect: 'error' });
+          if (!completed.ok) throw new Error('The agent run completion could not be confirmed.');
+          const run: unknown = await completed.json();
+          signal.throwIfAborted();
+          send(projection.complete(run, completion.run, authority.thread));
         } catch {
           if (!signal.aborted) send({ type: 'error', message: 'The agent could not finish a graph-backed answer. The map and explanations remain available.' });
         } finally { await revoke(); try { controller.close(); } catch {} }
