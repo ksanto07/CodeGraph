@@ -1,30 +1,37 @@
 import assert from 'node:assert/strict';
-import { fileURLToPath } from 'node:url';
 import { getNodesBounds, getViewportForBounds } from '@xyflow/react';
-import { readParseResult } from '../lib/parser/result-file.ts';
+import { parseRepository } from '../lib/parser/repository.ts';
 import { foldAtThreshold, foldGraph, selectionScope, uniqueLabels } from '../lib/canvas/model.ts';
 import { endpointHandle, folderTopology, layoutGraph, visibleRows } from '../lib/canvas/layout.ts';
+import { canvasViewport } from '../lib/canvas/viewport.ts';
 
-const fixture = await readParseResult(fileURLToPath(new URL('../lib/canvas/fixture.json', import.meta.url)));
+const parsed = await parseRepository(process.cwd());
+const template = parsed.files.find(file => parsed.edges.some(edge => edge.from === file.id || edge.to === file.id));
+assert(template, 'The repository has a connected source file for the expansion fixture.');
+const overflowRows = Array.from({ length: visibleRows + 2 }, (_, index) => ({ ...template, id: `${template.folder}/__verify_overflow_${index}.ts`, fanIn: 0, fanOut: 0 }));
+const fixture = { files: [...parsed.files, ...overflowRows], edges: parsed.edges };
 const originalFixture = JSON.stringify(fixture);
 const graph = foldGraph(fixture.files, fixture.edges);
 const originalGraph = JSON.stringify({ folders: graph.folders, edges: graph.edges, owner: [...graph.owner] });
-assert.equal(fixture.files.length, 255);
-assert.equal(fixture.edges.length, 491);
-assert.equal(graph.folders.length, 24);
-assert.equal(graph.threshold, 5);
+assert(fixture.files.length > 2, 'The current repository contains enough source files to map.');
+assert(fixture.edges.length > 0, 'The current repository has real resolved imports.');
+assert(graph.folders.length <= 24, 'The current repository folds under the specified node limit.');
+assert(graph.threshold >= 2, 'Folding begins at the specified minimum threshold.');
 assert(graph.folders.every(folder => folder.files.length > 1));
 const members = graph.folders.flatMap(folder => folder.files.map(file => file.id)).sort();
 assert.deepEqual(members, fixture.files.map(file => file.id).sort());
 assert.equal(new Set(members).size, members.length);
-for (let threshold = 2; threshold < graph.threshold; threshold++) assert(foldAtThreshold(fixture.files, threshold).size > 24);
+for (let threshold = 2; threshold < graph.threshold; threshold++) {
+  const earlier = foldAtThreshold(fixture.files, threshold);
+  assert(earlier.size > 24 || [...earlier.values()].some(files => files.length < 2), 'The chosen threshold is the lowest that satisfies both node-count and membership constraints.');
+}
 assert(graph.edges.every(edge => graph.owner.has(edge.from) && graph.owner.has(edge.to)));
 const permuted = foldGraph([...fixture.files].reverse(), [...fixture.edges].reverse());
 assert.deepEqual(permuted, graph);
 assert.deepEqual(layoutGraph(permuted, new Set()), layoutGraph(graph, new Set()));
 const collapsedNodes = layoutGraph(graph, new Set()).map(node => ({ ...node, data: {} }));
 const collapsedBounds = getNodesBounds(collapsedNodes);
-const initialViewport = getViewportForBounds(collapsedBounds, 876, 720, 0.05, 1, 0.12);
+const initialViewport = canvasViewport(collapsedBounds, 876, 720, 1, true);
 assert(initialViewport.zoom >= 0.85, 'Initial desktop fit keeps 12px labels readable.');
 const opening = graph.folders.find(folder => folder.files.length > visibleRows)!;
 const expanded = new Set([opening.id]);

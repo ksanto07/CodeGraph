@@ -5,8 +5,6 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
     <ClerkProvider
       signInUrl="/sign-in"
       signUpUrl="/sign-up"
-      signInForceRedirectUrl="/"
-      signUpForceRedirectUrl="/"
       signInFallbackRedirectUrl="/"
       signUpFallbackRedirectUrl="/"
       appearance={{

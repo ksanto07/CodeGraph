@@ -7,8 +7,10 @@
 - A way for scripts outside the web app to load the same environment.
 - **The invented-path check.** Take every path-shaped token in an explanation
   and test it against the exact set of paths the model was shown. Anything else
-  was invented. Run it as a live evaluator against real traffic, not only
-  against a saved dataset.
+  is unsupported. Explicit path references absent from that set fail. Unknown
+  unframed slash terms can also be prose, so retain them and mark the answer
+  unscored rather than inventing a hallucination finding or passing it. Report
+  scored coverage alongside passes. Run it against real traffic and saved data.
 - **Role accuracy.** Convention already assigns roles it can be certain of, and
   those files never reach the model in normal operation — which makes them a
   held-out set with real ground truth. Hide the role, ask the model, compare.

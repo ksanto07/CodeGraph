@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { builtinModules } from 'node:module';
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { Node, Project, SyntaxKind, ts } from 'ts-morph';
+import { Node, Project, SymbolFlags, SyntaxKind, ts } from 'ts-morph';
 import { projectGraph, summarize } from './graph.ts';
 import { noFrameworkAdapter } from './types.ts';
 import type { FrameworkAdapter, ConfigDiagnostic, ExcludedDirectory, FileNode, ImportCoverage, ImportKind, ImportOutcome, ParseResult, SkippedFile } from './types.ts';
@@ -13,8 +13,13 @@ const builtins = new Set(builtinModules.flatMap(name => [name, `node:${name}`]))
 const normalize = (value: string) => value.split(path.sep).join('/');
 const inside = (root: string, target: string) => { const relative = path.relative(root, target); return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative)); };
 const diagnosticText = (diagnostic: ts.Diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n');
+const bindingDeclaration = (node: Node) => Node.isVariableDeclaration(node) || Node.isFunctionDeclaration(node) || Node.isFunctionExpression(node) || Node.isClassDeclaration(node) || Node.isClassExpression(node) || Node.isEnumDeclaration(node) || Node.isModuleDeclaration(node) || Node.isImportEqualsDeclaration(node) || Node.isNamespaceImport(node) || Node.isParameterDeclaration(node) || Node.isImportSpecifier(node) || Node.isImportClause(node) || Node.isBindingElement(node);
 
-export async function parseRepository(input: string, adapter: FrameworkAdapter = noFrameworkAdapter): Promise<ParseResult> {
+export interface ParserLimits { sourceFiles?: number; imports?: number; }
+
+export async function parseRepository(input: string, adapter: FrameworkAdapter = noFrameworkAdapter, limits: ParserLimits = {}): Promise<ParseResult> {
+  for (const limit of Object.values(limits)) if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 0)) throw new Error('Parser limits must be non-negative safe integers.');
+  let selectedSources = 0;
   const root = await realpath(path.resolve(input));
   if (!(await stat(root)).isDirectory()) throw new Error(`Not a directory: ${input}`);
   const paths: string[] = [];
@@ -30,11 +35,14 @@ export async function parseRepository(input: string, adapter: FrameworkAdapter =
       if (entry.isDirectory()) {
         if (pruned.has(entry.name)) excludedDirectories.push({ path: relative, reason: 'generated, dependency, or version-control directory' });
         else await walk(absolute);
-      } else if (entry.isFile()) paths.push(absolute);
+      } else if (entry.isFile()) {
+        if (supported.has(path.extname(relative).toLowerCase()) && ++selectedSources > (limits.sourceFiles ?? Infinity)) throw new Error(`Repository exceeds source file limit (${limits.sourceFiles}).`);
+        paths.push(absolute);
+      }
     }
   }
   await walk(root);
-  const project = new Project({ useInMemoryFileSystem: true, skipAddingFilesFromTsConfig: true });
+  const project = new Project({ useInMemoryFileSystem: true, skipAddingFilesFromTsConfig: true, compilerOptions: { allowJs: true } });
   const files: FileNode[] = [];
   const sources = new Map<string, ReturnType<Project['createSourceFile']>>();
   for (const absolute of paths) {
@@ -80,14 +88,17 @@ export async function parseRepository(input: string, adapter: FrameworkAdapter =
     return { allowJs: true, module: ts.ModuleKind.CommonJS, moduleResolution: ts.ModuleResolutionKind.Node10 };
   }
   const coverage: ImportCoverage[] = [];
+  function checkImportLimit(): void {
+    if (coverage.length >= (limits.imports ?? Infinity)) throw new Error(`Repository exceeds import limit (${limits.imports}).`);
+  }
   for (const [absolute, source] of sources) {
     const sourceId = normalize(path.relative(root, absolute));
     const options = optionsFor(absolute);
     source.compilerNode.impliedNodeFormat = ts.getImpliedNodeFormatForFile(absolute, undefined, ts.sys, options);
-    async function resolve(specifier: string, literal: ts.StringLiteralLike): Promise<ImportOutcome> {
+    async function resolve(specifier: string, literal: ts.StringLiteralLike, kind: ImportKind): Promise<ImportOutcome> {
       if (builtins.has(specifier)) return { kind: 'outside', target: specifier, reason: 'Node built-in module' };
       try {
-        const mode = ts.getModeForUsageLocation(source.compilerNode, literal, options);
+        const mode = kind === 'require' ? ts.ModuleKind.CommonJS : ts.getModeForUsageLocation(source.compilerNode, literal, options);
         const resolution = ts.resolveModuleName(specifier, absolute, options, ts.sys, undefined, undefined, mode).resolvedModule;
         const exactTarget = specifier.startsWith('.') || path.isAbsolute(specifier) ? path.resolve(path.dirname(absolute), specifier) : undefined;
         const excludedTarget = exactTarget && !supported.has(path.extname(exactTarget).toLowerCase()) && ts.sys.fileExists(exactTarget) ? exactTarget : undefined;
@@ -110,9 +121,10 @@ export async function parseRepository(input: string, adapter: FrameworkAdapter =
       } catch (error) { return { kind: 'unresolved', reason: 'resolver-error', detail: error instanceof Error ? error.message : String(error) }; }
     }
     async function add(kind: ImportKind, literal: ReturnType<typeof source.getImportDeclarations>[number]['compilerNode']['moduleSpecifier']): Promise<void> {
+      checkImportLimit();
       const location = source.getLineAndColumnAtPos(literal.getStart(source.compilerNode));
       const specifier = ts.isStringLiteralLike(literal) ? literal.text : literal.getText(source.compilerNode);
-      coverage.push({ source: sourceId, kind, specifier, ...location, outcome: ts.isStringLiteralLike(literal) ? await resolve(specifier, literal) : { kind: 'unresolved', reason: 'non-literal', detail: 'Dynamic import argument is not a string literal.' } });
+      coverage.push({ source: sourceId, kind, specifier, ...location, outcome: ts.isStringLiteralLike(literal) ? await resolve(specifier, literal, kind) : { kind: 'unresolved', reason: 'non-literal', detail: `${kind === 'require' ? 'Require' : 'Dynamic import'} argument is not a string literal.` } });
     }
     for (const declaration of source.getDescendantsOfKind(SyntaxKind.ImportDeclaration)) await add('import', declaration.compilerNode.moduleSpecifier);
     for (const declaration of source.getDescendantsOfKind(SyntaxKind.ExportDeclaration)) if (declaration.compilerNode.moduleSpecifier) await add('re-export', declaration.compilerNode.moduleSpecifier);
@@ -121,11 +133,70 @@ export async function parseRepository(input: string, adapter: FrameworkAdapter =
       if (ts.isLiteralTypeNode(argument)) await add('import', argument.literal);
     }
     for (const call of source.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-      if (call.getExpression().getKind() !== SyntaxKind.ImportKeyword) continue;
+      const expression = call.getExpression();
+      const commonjs = Node.isIdentifier(expression) && expression.getText() === 'require' && !expression.getSymbol()?.getDeclarations().some(declaration => bindingDeclaration(declaration) && declaration.getSourceFile() === source && !source.isDeclarationFile());
+      if (expression.getKind() !== SyntaxKind.ImportKeyword && !commonjs) continue;
+      const kind = commonjs ? 'require' : 'dynamic-import';
       const argument = call.getArguments()[0];
-      if (argument && Node.isExpression(argument)) await add('dynamic-import', argument.compilerNode);
-      else coverage.push({ source: sourceId, kind: 'dynamic-import', specifier: '', ...source.getLineAndColumnAtPos(call.getStart()), outcome: { kind: 'unresolved', reason: 'non-literal', detail: 'Dynamic import has no argument.' } });
+      if (argument && Node.isExpression(argument)) await add(kind, argument.compilerNode);
+      else {
+        checkImportLimit();
+        coverage.push({ source: sourceId, kind, specifier: '', ...source.getLineAndColumnAtPos(call.getStart()), outcome: { kind: 'unresolved', reason: 'non-literal', detail: `${commonjs ? 'Require' : 'Dynamic import'} has no argument.` } });
+      }
     }
+    const exportNames = new Set([...source.getExportedDeclarations()].filter(([, declarations]) => declarations.some(declaration => (!Node.isPropertyAccessExpression(declaration) && !Node.isElementAccessExpression(declaration)) || declaration.getFirstAncestorByKind(SyntaxKind.ExportAssignment))).map(([name]) => name));
+    const commonjsNames = new Set<string>();
+    let exportsAttached = true;
+    let uncertainExports = false;
+    function staticProperty(node: Node): string | undefined {
+      if (Node.isPropertyAccessExpression(node)) return node.getName();
+      if (Node.isElementAccessExpression(node)) {
+        const name = node.getArgumentExpression();
+        if (name && (Node.isStringLiteral(name) || Node.isNoSubstitutionTemplateLiteral(name))) return name.getLiteralValue();
+      }
+    }
+    function globalIdentifier(node: Node, name: string): boolean {
+      return Node.isIdentifier(node) && node.getText() === name && !node.getSymbolsInScope(SymbolFlags.Value | SymbolFlags.Alias).some(symbol => symbol.getName() === name && symbol.getDeclarations().some(declaration => bindingDeclaration(declaration) && declaration.getSourceFile() === source && !source.isDeclarationFile()));
+    }
+    function moduleExports(node: Node): boolean {
+      return (Node.isPropertyAccessExpression(node) || Node.isElementAccessExpression(node)) && staticProperty(node) === 'exports' && globalIdentifier(node.getExpression(), 'module');
+    }
+    for (const expression of source.getDescendantsOfKind(SyntaxKind.BinaryExpression)) {
+      if (expression.getOperatorToken().getKind() !== SyntaxKind.EqualsToken) continue;
+      const left = expression.getLeft();
+      const owner = Node.isPropertyAccessExpression(left) || Node.isElementAccessExpression(left) ? left.getExpression() : undefined;
+      const replacesModule = moduleExports(left);
+      const replacesAlias = globalIdentifier(left, 'exports');
+      const writesModule = owner && moduleExports(owner);
+      const writesAlias = owner && globalIdentifier(owner, 'exports');
+      if (!replacesModule && !replacesAlias && !writesModule && !writesAlias) continue;
+      const statement = expression.getParent();
+      if (!Node.isExpressionStatement(statement) || statement.getParent() !== source) {
+        uncertainExports = true;
+        continue;
+      }
+      if (replacesAlias) { exportsAttached = moduleExports(expression.getRight()); continue; }
+      if (replacesModule) {
+        commonjsNames.clear();
+        exportsAttached = false;
+        const right = expression.getRight();
+        if (Node.isObjectLiteralExpression(right)) for (const property of right.getProperties()) {
+          if (Node.isPropertyAssignment(property) || Node.isShorthandPropertyAssignment(property) || Node.isMethodDeclaration(property)) {
+            const name = property.getNameNode();
+            if (Node.isIdentifier(name)) commonjsNames.add(name.getText());
+            else if (Node.isStringLiteral(name) || Node.isNumericLiteral(name)) commonjsNames.add(String(name.getLiteralValue()));
+          }
+        }
+        else commonjsNames.add('default');
+      } else if (writesModule || (writesAlias && exportsAttached)) {
+        const name = staticProperty(left);
+        if (name !== undefined) commonjsNames.add(name);
+      }
+    }
+    if (!uncertainExports) for (const name of commonjsNames) exportNames.add(name);
+    const file = files.find(file => file.id === sourceId)!;
+    file.exportNames = [...exportNames].sort();
+    if (exportNames.size) file.moduleKind = 'module';
   }
   coverage.sort((a, b) => a.source.localeCompare(b.source) || a.line - b.line || a.column - b.column);
   skipped.sort((a, b) => a.path.localeCompare(b.path));

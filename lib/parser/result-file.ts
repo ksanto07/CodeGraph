@@ -15,7 +15,7 @@ function relative(value: unknown): string {
   if (!result || /^[A-Za-z]:/.test(result) || result.includes('\\') || path.posix.isAbsolute(result) || result === '..' || result.startsWith('../') || path.posix.normalize(result) !== result) throw new Error('Invalid relative path in parser result.');
   return result;
 }
-function importKind(value: unknown): ImportKind { if (value !== 'import' && value !== 're-export' && value !== 'dynamic-import') throw new Error('Invalid import kind.'); return value; }
+function importKind(value: unknown): ImportKind { if (value !== 'import' && value !== 're-export' && value !== 'dynamic-import' && value !== 'require') throw new Error('Invalid import kind.'); return value; }
 function unresolvedReason(value: unknown): UnresolvedReason { if (value !== 'missing-file' && value !== 'missing-package' && value !== 'non-literal' && value !== 'resolver-error') throw new Error('Invalid unresolved reason.'); return value; }
 function outcome(value: unknown): ImportOutcome {
   const item = record(value);
@@ -44,7 +44,9 @@ export function validateParseResult(value: unknown): ParseResult {
     const folder = relative(item.folder);
     if (folder !== path.posix.dirname(id)) throw new Error('File folder does not match its path.');
     const annotations = Object.fromEntries(Object.entries(record(item.annotations)).map(([key, value]) => [key, string(value)]));
-    return { id, folder, sha256, moduleKind, annotations, lines: integer(item.lines), fanIn: integer(item.fanIn), fanOut: integer(item.fanOut) };
+    const exportNames = item.exportNames === undefined ? undefined : array(item.exportNames).map(string);
+    if (exportNames) unique(exportNames, 'export name');
+    return { id, folder, sha256, moduleKind, annotations, lines: integer(item.lines), fanIn: integer(item.fanIn), fanOut: integer(item.fanOut), ...(exportNames ? { exportNames } : {}) };
   });
   const skipped = array(data.skipped).map(value => { const item = record(value); return { path: relative(item.path), reason: string(item.reason), detail: string(item.detail) }; });
   const excludedDirectories = array(data.excludedDirectories).map(value => { const item = record(value); return { path: relative(item.path), reason: string(item.reason) }; });

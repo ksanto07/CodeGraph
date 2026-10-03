@@ -2,9 +2,14 @@ import { useMemo, useState } from 'react';
 import { category, type FolderGraph, type Selection } from '@/lib/canvas/model';
 import { walk, type WalkDirection } from '@/lib/canvas/graph-maths';
 import { folderKinds, type DetailIndex } from '@/lib/canvas/details';
+import type { FrameworkMetadata } from '@/lib/adapters/taxonomy';
+import type { ExplanationResult } from '@/lib/ai/service';
+import { ExplanationProse } from './explanation-prose';
+import { rerunAnalysis } from '@/app/(workspace)/analyses/actions';
 
-interface DetailProps { categoryFiles: Set<string> | null; repositoryName: string; edgeCount: number; index: DetailIndex; graph: FolderGraph; selection: Selection; hover: Selection; selectFile: (id: string) => void; setHover: (selection: Selection) => void }
-export function DetailPane({ categoryFiles, repositoryName, edgeCount, index, graph, selection, hover, selectFile, setHover }: DetailProps) {
+export interface PaneExplanation { body?: string; key?: string; loading?: boolean; error?: string; result?: Extract<ExplanationResult, { status: 'ok' }> }
+interface DetailProps { analysisId: string; explanation?: PaneExplanation; explanationEnabled: boolean; explain: () => void; metadata: FrameworkMetadata; categoryFiles: Set<string> | null; repositoryName: string; edgeCount: number; index: DetailIndex; graph: FolderGraph; selection: Selection; hover: Selection; selectFile: (id: string) => void; setHover: (selection: Selection) => void }
+export function DetailPane({ analysisId, explanation, explanationEnabled, explain, metadata, categoryFiles, repositoryName, edgeCount, index, graph, selection, hover, selectFile, setHover }: DetailProps) {
   const [tab, setTab] = useState<'structure' | 'explanation'>('structure');
   const [traversal, setTraversal] = useState<{ id: string; direction: WalkDirection } | null>(null);
   const file = selection?.kind === 'file' ? index.files.get(selection.id) : undefined;
@@ -17,10 +22,25 @@ export function DetailPane({ categoryFiles, repositoryName, edgeCount, index, gr
     return <section className="detail-section"><h3>{direction === 'outgoing' ? 'Dependencies' : 'Dependents'} <span>{count(rows.map(row => row.file.id))}</span></h3>{rows.length ? <ul className="detail-list">{rows.map(row => <li key={row.file.id} className={categoryFiles && !categoryFiles.has(row.file.id) ? 'category-dimmed' : ''}>{path(row.file.id)}<small>{row.kinds.join(', ')}</small></li>)}</ul> : <p className="detail-empty">None.</p>}</section>;
   };
   const folder = selection?.kind === 'folder' ? graph.folders.find(item => item.id === selection.id) : undefined;
+  const evaluation = explanation?.result?.evaluation;
   return <aside className="preview-details" aria-label="Details">
     {selection && <div className="detail-tabs" role="tablist" aria-label="Detail view">{(['structure', 'explanation'] as const).map(name => <button key={name} id={`detail-tab-${name}`} role="tab" aria-selected={tab === name} aria-controls={`detail-${name}`} onClick={() => setTab(name)}>{name === 'structure' ? 'Structure' : 'Explanation'}</button>)}</div>}
     <div id={selection ? `detail-${tab}` : undefined} role={selection ? "tabpanel" : undefined} aria-labelledby={selection ? `detail-tab-${tab}` : undefined}>
-      {selection && tab === 'explanation' ? <><h2 className="detail-heading detail-mono">{file ? path(file.id) : folder?.id}</h2><p className="detail-empty">No explanation yet.</p></> : file ? <>
+      {selection && tab === 'explanation' ? <>
+        <h2 className="detail-heading detail-mono">{file ? path(file.id) : folder?.id}</h2>
+        <div className="explanation-controls"><button disabled={explanation?.loading || !explanationEnabled} onClick={explain}>{explanation?.loading ? 'Explaining…' : file ? 'Explain file' : 'Explain folder'}</button></div>
+        {!explanationEnabled && <p className="detail-empty">Choose an explanation model to explain this selection.</p>}
+        {explanation?.error && <p className="explanation-error" role="alert">{explanation.error}</p>}
+        {explanation?.result && <p className="explanation-status">{explanation.result.cached ? 'Cache hit. No model call.' : 'New explanation.'} {explanation.result.tracing ? 'Run traced.' : 'Tracing unavailable.'} <code>{explanation.result.model}</code></p>}
+        {evaluation && <div className="explanation-status" role="status">
+          <p>{evaluation.invented.length ? `Path check found ${evaluation.invented.length} ${evaluation.invented.length === 1 ? 'mention' : 'mentions'} not supplied to the model.` : evaluation.score === null ? 'Path check unscored. Some terms could be prose or unframed paths.' : 'Path check passed.'} {evaluation.checked.length} path-shaped {evaluation.checked.length === 1 ? 'term' : 'terms'} checked. {evaluation.feedback === 'recorded' ? 'Feedback recorded.' : evaluation.feedback === 'local_only' ? 'Feedback local only.' : 'Feedback upload failed.'}</p>
+          {evaluation.invented.length > 0 && <><ul className="detail-list">{evaluation.invented.slice(0, 20).map(mention => <li key={`${mention.start}:${mention.end}`}><code>{mention.raw}</code></li>)}</ul>{evaluation.invented.length > 20 && <p>{evaluation.invented.length - 20} more unshown path mentions.</p>}</>}
+          {evaluation.ambiguous.length > 0 && <><p>Ambiguous terms need explicit path framing.</p><ul className="detail-list">{evaluation.ambiguous.slice(0, 20).map(mention => <li key={`${mention.start}:${mention.end}`}><code>{mention.raw}</code></li>)}</ul>{evaluation.ambiguous.length > 20 && <p>{evaluation.ambiguous.length - 20} more ambiguous terms.</p>}</>}
+        </div>}
+        {explanation?.body && !explanation.result && <p className="explanation-status">Saved explanation. Explain again to check freshness and record a cache lookup.</p>}
+        {explanation?.result && explanation.result.freshness.kind !== 'current' && <div className="explanation-notice" role="status"><p>{explanation.result.freshness.kind === 'stale' ? 'This explanation describes an older analysis.' : 'Repository freshness could not be confirmed.'}</p>{explanation.result.freshness.messages.map(message => <p key={message}>{message}</p>)}{explanation.result.freshness.changedPaths.length > 0 && <p>{explanation.result.freshness.changedPaths.length} {explanation.result.freshness.changedPaths.length === 1 ? 'file changed' : 'files changed'}.</p>}<form action={rerunAnalysis.bind(null, analysisId)}><button>Re-analyze</button></form></div>}
+        {explanation?.body ? <ExplanationProse body={explanation.body} paths={[...index.files.keys()]} selectFile={selectFile} /> : <p className="detail-empty">{explanation?.loading ? 'Reading this selection’s actual dependencies and dependents.' : 'Explain this selection using its parsed neighbours.'}</p>}
+      </> : file ? <>
         <h2 className="detail-heading">{path(file.id)}</h2>
         <dl className="detail-facts"><dt>Kind</dt><dd>{category(file).name}</dd><dt>Module</dt><dd>{file.moduleKind}</dd><dt>Folder</dt><dd className="detail-mono">{file.folder || '.'}</dd><dt>Lines</dt><dd>{file.lines}</dd></dl>
         <section className="detail-section"><h3>Trace this file</h3><div className="traversal-buttons">{(['incoming', 'outgoing'] as const).map(value => <button key={value} aria-pressed={direction === value} onClick={() => setTraversal(direction === value ? null : { id: file.id, direction: value })}>{value === 'incoming' ? 'Blast radius' : 'Dependency chain'}</button>)}</div>
@@ -32,8 +52,9 @@ export function DetailPane({ categoryFiles, repositoryName, edgeCount, index, gr
         {folderKinds(folder).map(group => <section key={group.id} className="detail-section"><h3>{group.name} <span>{count(group.files.map(member => member.id))}</span></h3><ul className="detail-list">{group.files.map(member => <li key={member.id} className={categoryFiles && !categoryFiles.has(member.id) ? 'category-dimmed' : ''}>{path(member.id)}</li>)}</ul></section>)}
       </> : <>
         <h2 className="detail-heading">{repositoryName}</h2>
-        <dl className="detail-facts"><dt>Framework</dt><dd>Not detected</dd><dt>Files</dt><dd>{index.files.size}</dd><dt>Imports</dt><dd>{edgeCount}</dd><dt>Routes</dt><dd>Unavailable</dd><dt>Unidentified</dt><dd>{index.unidentified}</dd></dl>
-        <p className="detail-empty">Framework and route metadata are unavailable. Unidentified files have no convention annotation.</p>
+        <dl className="detail-facts"><dt>Framework</dt><dd>{metadata.framework === 'none' ? 'Not detected' : metadata.framework}</dd><dt>Files</dt><dd>{index.files.size}</dd><dt>Imports</dt><dd>{edgeCount}</dd><dt>Routes</dt><dd>{metadata.routes.length}</dd><dt>Unidentified</dt><dd>{index.unidentified}</dd></dl>
+        <p className="detail-empty">Routes are emitted only when the method and full pattern can be recovered exactly.</p>
+        <section className="detail-section"><h3>Routes <span>{metadata.routes.length}</span></h3>{metadata.routes.length ? <table className="routes-table"><thead><tr><th>Method</th><th>Pattern</th></tr></thead><tbody>{metadata.routes.map(route => <tr key={`${route.file}:${route.method}:${route.path}`}><td><code>{route.method}</code></td><td><button className="detail-path" title={route.file} onClick={() => selectFile(route.file)}>{route.path}</button></td></tr>)}</tbody></table> : <p className="detail-empty">No exactly recoverable routes.</p>}</section>
         <section className="detail-section"><h3>Most depended on <span>{count(index.dependedOn.map(member => member.id))}</span></h3>{index.dependedOn.length ? <ol className="detail-list detail-ranking">{index.dependedOn.map(member => <li key={member.id} className={categoryFiles && !categoryFiles.has(member.id) ? 'category-dimmed' : ''}>{path(member.id)}<small>{index.incoming.get(member.id)!.length} dependents</small></li>)}</ol> : <p className="detail-empty">None.</p>}</section>
         <section className="detail-section"><h3>Where to start <span>{count(index.entryFiles.map(member => member.id))}</span></h3><p className="detail-empty">Files nothing imports, ordered by dependency count.</p>{index.entryFiles.length ? <ol className="detail-list detail-ranking">{index.entryFiles.map(member => <li key={member.id} className={categoryFiles && !categoryFiles.has(member.id) ? 'category-dimmed' : ''}>{path(member.id)}<small>{index.outgoing.get(member.id)!.length} dependencies</small></li>)}</ol> : <p className="detail-empty">None.</p>}</section>
       </>}

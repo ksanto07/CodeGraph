@@ -31,8 +31,11 @@
 - **The cache read happens inside the traced call**, not before it. A cache hit
   must appear in the traces as a recorded run containing no model call —
   otherwise there's no way to tell a working cache from a broken one.
-- Model versions are pinned exactly, never to a moving alias, and the model
-  name is part of the cache key. Re-pinning one invalidates only its own cache.
+- Models use exact slugs from the connected ChatGPT catalog. Dated snapshots
+  keep stable cache namespaces. User-approved catalog aliases use a versioned UTC
+  day namespace and expire at the next UTC boundary (at most 24 hours). The real
+  slug remains in storage and traces; no immutable revision date is invented.
+  Changing a model or cache revision invalidates only its own cache.
 - Classification may only answer with roles that are _not_ structural. It may
   say service, repository, model, util, config, component or hook. It may never
   say page, route or controller — those decide the route table and the

@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
-import { fileURLToPath } from 'node:url';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { detailIndex } from '../lib/canvas/details.ts';
 import { insights, walk } from '../lib/canvas/graph-maths.ts';
 import { category, foldGraph } from '../lib/canvas/model.ts';
 import { nextEntryAdapter, runnerConfigAdapter } from '../lib/adapters/entry-points.ts';
-import { readParseResult } from '../lib/parser/result-file.ts';
+import { parseRepository } from '../lib/parser/repository.ts';
 import { noFrameworkAdapter, type Edge, type FileNode } from '../lib/parser/types.ts';
 
 const file = (id: string, lines = 4): FileNode => ({ id, folder: id.includes('/') ? id.slice(0, id.lastIndexOf('/')) : '.', lines, sha256: '', moduleKind: 'module', fanIn: 99, fanOut: 99, annotations: {} });
@@ -69,12 +71,20 @@ assert.deepEqual(insights(detailIndex(entryFiles, [])).unimported.map(member => 
 const unrelatedAnnotation = { ...file('ordinary.ts'), annotations: { convention: 'known' } };
 assert.equal(insights(detailIndex([unrelatedAnnotation], [])).unimported.length, 1, 'Only the explicit entryPoint annotation excludes zero-incoming files.');
 
-const fixture = await readParseResult(fileURLToPath(new URL('../lib/canvas/fixture.json', import.meta.url)));
+const fixture = await parseRepository(process.cwd());
 const fixtureSnapshot = JSON.stringify(fixture);
 const annotatedFiles = fixture.files.map(member => ({ ...member, annotations: runnerConfigAdapter.annotate(member) }));
 const real = detailIndex(annotatedFiles, fixture.edges);
 const realFacts = insights(real);
-assert(realFacts.cycles.length > 0, 'The unchanged checked-in fixture contains a real import cycle.');
+const cycleDirectory = await mkdtemp(path.join(tmpdir(), 'cartograph-cycle-'));
+try {
+  await writeFile(path.join(cycleDirectory, 'a.ts'), "import './b';");
+  await writeFile(path.join(cycleDirectory, 'b.ts'), "import './a';");
+  const parsedCycle = await parseRepository(cycleDirectory);
+  const parsedFacts = insights(detailIndex(parsedCycle.files, parsedCycle.edges));
+  assert.equal(parsedFacts.cycles.length, 1, 'A cycle parsed from actual source remains discoverable without checked-in output.');
+  checkWitness(parsedFacts.cycles[0], parsedCycle.edges);
+} finally { await rm(cycleDirectory, { recursive: true, force: true }); }
 for (const cycle of realFacts.cycles) checkWitness(cycle, fixture.edges);
 const excluded = annotatedFiles.filter(member => member.annotations.entryPoint && real.incoming.get(member.id)!.length === 0);
 assert(excluded.length > 0, 'The fixture includes externally reached entries with zero observed importers.');
@@ -90,4 +100,4 @@ assert.deepEqual(insights(detailIndex([...annotatedFiles].reverse(), [...fixture
 assert.equal(JSON.stringify(fixture), fixtureSnapshot);
 console.log('Walk directions, shortest distances, distinct files, exact further counts, iterative SCCs, real directed witnesses, entry adapters, threshold boundaries, category totals, determinism and immutable inputs passed.');
 console.log(`${fixture.files.length} unchanged fixture files, ${realFacts.cycles.length} cyclic groups, ${realFacts.unimported.length} unimported files, ${excluded.length} external entries excluded.`);
-console.log(`Real cycle ${realFacts.cycles[0].witness.map(member => member.id).join(' -> ')}`);
+if (realFacts.cycles.length) console.log(`Real cycle ${realFacts.cycles[0].witness.map(member => member.id).join(' -> ')}`);

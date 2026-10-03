@@ -1,0 +1,48 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { checkFreshness } from '../lib/ai/freshness.ts';
+import type { FileNode } from '../lib/parser/types.ts';
+
+const commit = 'a'.repeat(40);
+const later = 'b'.repeat(40);
+const bytes = new Uint8Array([0xef, 0xbb, 0xbf, 0x61, 0x0d, 0x0a, 0xff]);
+const file = (id = 'src/a.ts'): FileNode => ({ id, folder: 'src', sha256: createHash('sha256').update(bytes).digest('hex'), lines: 1, moduleKind: 'module', fanIn: 0, fanOut: 0, annotations: {} });
+const transport = (head: string, body: Uint8Array = bytes): typeof fetch => async url => String(url).includes('api.github.com')
+  ? Response.json({ sha: head }) : new Response(new Uint8Array(body));
+assert.equal((await checkFreshness('owner/repo', commit, [file()], transport(commit))).kind, 'current');
+const moved = await checkFreshness('owner/repo', commit, [file()], transport(later));
+assert.equal(moved.kind, 'stale');
+assert.equal(moved.latestCommit, later);
+assert.deepEqual(moved.changedPaths, []);
+const changed = await checkFreshness('owner/repo', commit, [file()], transport(commit, new Uint8Array([0x61, 0x0a])));
+assert.equal(changed.kind, 'stale');
+assert.deepEqual(changed.changedPaths, ['src/a.ts']);
+const deleted: typeof fetch = async url => String(url).includes('api.github.com') ? Response.json({ sha: commit }) : new Response(null, { status: 404 });
+assert.deepEqual((await checkFreshness('owner/repo', commit, [file()], deleted)).changedPaths, ['src/a.ts']);
+assert.equal((await checkFreshness('owner/repo', commit, [file()], async () => new Response(null, { status: 429 }))).kind, 'unknown');
+assert.equal((await checkFreshness('owner/repo', commit, [file()], async () => { throw new Error('offline'); })).kind, 'unknown');
+const partial: typeof fetch = async url => String(url).includes('api.github.com') ? Response.json({ sha: later }) : new Response(null, { status: 403 });
+const knownStale = await checkFreshness('owner/repo', commit, [file()], partial);
+assert.equal(knownStale.kind, 'stale');
+assert(knownStale.messages.some(message => message.includes('limited')));
+const requests: string[] = [];
+const encoding: typeof fetch = async url => { requests.push(String(url)); return String(url).includes('api.github.com') ? Response.json({ sha: commit }) : new Response(bytes); };
+assert.equal((await checkFreshness('owner/repo', commit, [file('src/a #é%?.ts')], encoding)).kind, 'current');
+assert.equal(requests[1], `https://raw.githubusercontent.com/owner/repo/${commit}/src/a%20%23%C3%A9%25%3F.ts`);
+assert.equal((await checkFreshness('owner/repo', commit, [file('../secret')], encoding)).kind, 'unknown');
+assert.equal(requests.length, 2);
+assert.equal((await checkFreshness('owner/repo', commit, [file()], async () => Response.json({ sha: 'HEAD' }))).kind, 'unknown');
+let active = 0;
+let maximum = 0;
+const concurrent: typeof fetch = async url => {
+  if (String(url).includes('api.github.com')) return Response.json({ sha: commit });
+  active++; maximum = Math.max(maximum, active);
+  await new Promise(resolve => setTimeout(resolve, 2));
+  active--;
+  return new Response(bytes);
+};
+assert.equal((await checkFreshness('owner/repo', commit, Array.from({ length: 12 }, (_, index) => file(`src/${index}.ts`)), concurrent)).kind, 'current');
+assert.equal(maximum, 4);
+const oversized: typeof fetch = async url => String(url).includes('api.github.com') ? Response.json({ sha: commit }) : new Response(new ReadableStream<Uint8Array>({ pull(controller) { controller.enqueue(new Uint8Array(16 * 1024 * 1024)); } }));
+assert.equal((await checkFreshness('owner/repo', commit, [file()], oversized)).kind, 'unknown');
+console.log('Freshness checks immutable commits, raw bytes, encoded paths, deletion, uncertainty, bounded concurrency and streamed byte limits.');

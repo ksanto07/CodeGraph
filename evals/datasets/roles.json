@@ -1,0 +1,217 @@
+{
+  "schemaVersion": 1,
+  "groundTruth": "Existing framework adapter conventional roles; only semanticRoles; annotations hidden from every model context node.",
+  "selection": "Sorted by repository/path within role; non-test paths; distinct SHA256 content.",
+  "entries": [
+    {
+      "repository": "react-hook-form/react-hook-form",
+      "commit": "72d617f131ecba66119b6a4c0eccbc4934cf5343",
+      "path": "app/src/app.tsx",
+      "sha256": "3aa85db518d49733016e4d5dcf4e9e6fedcf94a5a5fb7a8f6bd0c232ae59d90f",
+      "role": "component"
+    },
+    {
+      "repository": "react-hook-form/react-hook-form",
+      "commit": "72d617f131ecba66119b6a4c0eccbc4934cf5343",
+      "path": "app/src/autoUnregister.tsx",
+      "sha256": "f11adb7482ea90eb43eb79c01f197fc4d43b3f4efe6d0ea4fe767e280c222d50",
+      "role": "component"
+    },
+    {
+      "repository": "react-hook-form/react-hook-form",
+      "commit": "72d617f131ecba66119b6a4c0eccbc4934cf5343",
+      "path": "app/src/basic.tsx",
+      "sha256": "4c722fbbd31c5bc760ee066af441e9ef49e55bcd4ba24ee8032ddb25ca7bd3cf",
+      "role": "component"
+    },
+    {
+      "repository": "react-hook-form/react-hook-form",
+      "commit": "72d617f131ecba66119b6a4c0eccbc4934cf5343",
+      "path": "app/src/basicSchemaValidation.tsx",
+      "sha256": "3acc6954c6433ea8ffe367ac854c85f1eed1e4add708e383681379c626c4dc8a",
+      "role": "component"
+    },
+    {
+      "repository": "react-hook-form/react-hook-form",
+      "commit": "72d617f131ecba66119b6a4c0eccbc4934cf5343",
+      "path": "app/src/changeInputType.tsx",
+      "sha256": "7c2829191a7068f989195889f04d7a4f1c4fd27ddc7d1bd3f5bdafd0ff7eab02",
+      "role": "component"
+    },
+    {
+      "repository": "react-hook-form/react-hook-form",
+      "commit": "72d617f131ecba66119b6a4c0eccbc4934cf5343",
+      "path": "app/src/conditionalField.tsx",
+      "sha256": "1e7de2d7a85bb8ab2926ce34ac90b26c8c7cac566e619693b0b5c117c9877441",
+      "role": "component"
+    },
+    {
+      "repository": "react-hook-form/react-hook-form",
+      "commit": "72d617f131ecba66119b6a4c0eccbc4934cf5343",
+      "path": "app/src/controller.tsx",
+      "sha256": "34fc3ed8b0d357c61ca71d4b377168dd6180ac30f3302ea79617ad329e16a14c",
+      "role": "component"
+    },
+    {
+      "repository": "react-hook-form/react-hook-form",
+      "commit": "72d617f131ecba66119b6a4c0eccbc4934cf5343",
+      "path": "app/src/crossFrameForm.tsx",
+      "sha256": "b0bd18b4cb4fde18049426e7dbdbc8b096488d5015da0a298a4c9964c594641d",
+      "role": "component"
+    },
+    {
+      "repository": "react-hook-form/react-hook-form",
+      "commit": "72d617f131ecba66119b6a4c0eccbc4934cf5343",
+      "path": "app/src/useFieldArray.tsx",
+      "sha256": "180f79471621111f2415f4fe45dcbc45411c6d73687a7add8bf1185a2d07a957",
+      "role": "hook"
+    },
+    {
+      "repository": "react-hook-form/react-hook-form",
+      "commit": "72d617f131ecba66119b6a4c0eccbc4934cf5343",
+      "path": "app/src/useFieldArrayNested.tsx",
+      "sha256": "97d5f0884d630c907447bb984375acd17813e75e5c429d81f1460de495ff9543",
+      "role": "hook"
+    },
+    {
+      "repository": "react-hook-form/react-hook-form",
+      "commit": "72d617f131ecba66119b6a4c0eccbc4934cf5343",
+      "path": "app/src/useFieldArrayUnregister.tsx",
+      "sha256": "115af07511eb4bceebc91911e7dc345d448214459a42be0049f0e7f274cbebbd",
+      "role": "hook"
+    },
+    {
+      "repository": "react-hook-form/react-hook-form",
+      "commit": "72d617f131ecba66119b6a4c0eccbc4934cf5343",
+      "path": "app/src/useFormState.tsx",
+      "sha256": "176b5b425ff956f2de5f188c59568ad6baa270e9f31929cd9ba341bdd68c4d44",
+      "role": "hook"
+    },
+    {
+      "repository": "react-hook-form/react-hook-form",
+      "commit": "72d617f131ecba66119b6a4c0eccbc4934cf5343",
+      "path": "app/src/useWatch.tsx",
+      "sha256": "730c183b6e27e85d9711cc43258e82cc19b82db7b1de9a8f348fe9725e065a6e",
+      "role": "hook"
+    },
+    {
+      "repository": "react-hook-form/react-hook-form",
+      "commit": "72d617f131ecba66119b6a4c0eccbc4934cf5343",
+      "path": "app/src/useWatchUseFieldArrayNested.tsx",
+      "sha256": "f543d86f76d0b49ac19a780c6b8628cd6efc30261922a6d7a61d6984bc23ba3f",
+      "role": "hook"
+    },
+    {
+      "repository": "react-hook-form/react-hook-form",
+      "commit": "72d617f131ecba66119b6a4c0eccbc4934cf5343",
+      "path": "examples/V7/useFieldArraySimpleExample.tsx",
+      "sha256": "1c1a9007b491ff1d69a79d74e8aefd66a18d3a7750e3348ca4277838f83191d7",
+      "role": "hook"
+    },
+    {
+      "repository": "react-hook-form/react-hook-form",
+      "commit": "72d617f131ecba66119b6a4c0eccbc4934cf5343",
+      "path": "src/useController.ts",
+      "sha256": "12bc0f3b8ba34bd87c2576e60185219b537b7823984070f3f4fcb62743095c50",
+      "role": "hook"
+    },
+    {
+      "repository": "nestjs/nest",
+      "commit": "35142c3eca8edaaf6abc5984d915da2fbd458aa2",
+      "path": "sample/01-cats-app/vitest.config.mts",
+      "sha256": "bc0920d51edfdac48a099d55be04394d8add0827a7682f331863bf7e039dd26b",
+      "role": "config"
+    },
+    {
+      "repository": "nestjs/nest",
+      "commit": "35142c3eca8edaaf6abc5984d915da2fbd458aa2",
+      "path": "sample/09-babel-example/vitest.config.mts",
+      "sha256": "908a024ead1f7a0cc59500da33ae6bd9169b6e2eb6ac34ee331a7d5ef429903c",
+      "role": "config"
+    },
+    {
+      "repository": "nestjs/nest",
+      "commit": "35142c3eca8edaaf6abc5984d915da2fbd458aa2",
+      "path": "sample/37-outbox/vitest.config.mts",
+      "sha256": "4c38438d4dce846dc31797249288493f3a5f5b52ef2e7adc0f0652ae90d37827",
+      "role": "config"
+    },
+    {
+      "repository": "nestjs/nest",
+      "commit": "35142c3eca8edaaf6abc5984d915da2fbd458aa2",
+      "path": "vitest.config.mts",
+      "sha256": "6faa303c1b08c3467a03a7bf112b5a0a1cface929f3898bdcbc2790bf0083a06",
+      "role": "config"
+    },
+    {
+      "repository": "react-hook-form/react-hook-form",
+      "commit": "72d617f131ecba66119b6a4c0eccbc4934cf5343",
+      "path": "app/vite.config.ts",
+      "sha256": "d5568634661a9260edc0a9221730b9ee3a40f008312b19bbc2e91151e8fa757c",
+      "role": "config"
+    },
+    {
+      "repository": "react-hook-form/react-hook-form",
+      "commit": "72d617f131ecba66119b6a4c0eccbc4934cf5343",
+      "path": "eslint.config.mjs",
+      "sha256": "5ded899ded6063533e66fda7375a2b446c2f8eb77a4d5c0040f5ce2bdf1030b0",
+      "role": "config"
+    },
+    {
+      "repository": "nestjs/nest",
+      "commit": "35142c3eca8edaaf6abc5984d915da2fbd458aa2",
+      "path": "packages/testing/services/capturing-logger.service.ts",
+      "sha256": "85e4e243fb990a03ece028a178b4ecce8824424c9911e3271221d4d62077666c",
+      "role": "service"
+    },
+    {
+      "repository": "nestjs/nest",
+      "commit": "35142c3eca8edaaf6abc5984d915da2fbd458aa2",
+      "path": "packages/testing/services/testing-logger.service.ts",
+      "sha256": "855a08313a73c47efbba70d0a25653d759ae6826086e6f4bc092ceca53da0527",
+      "role": "service"
+    },
+    {
+      "repository": "nestjs/nest",
+      "commit": "35142c3eca8edaaf6abc5984d915da2fbd458aa2",
+      "path": "sample/01-cats-app/src/cats/cats.service.ts",
+      "sha256": "59a0915fd6e728a0a1518391827f88e501f6a39713ed034e31c8e7ee72a12236",
+      "role": "service"
+    },
+    {
+      "repository": "nestjs/nest",
+      "commit": "35142c3eca8edaaf6abc5984d915da2fbd458aa2",
+      "path": "sample/05-sql-typeorm/src/users/users.service.ts",
+      "sha256": "05d9c2567c48c1bd062b7994bc0739f02c64746a40b7b730bacda304204ce65a",
+      "role": "service"
+    },
+    {
+      "repository": "nestjs/nest",
+      "commit": "35142c3eca8edaaf6abc5984d915da2fbd458aa2",
+      "path": "sample/06-mongoose/src/cats/cats.service.ts",
+      "sha256": "d347733c3881c0180aa5b3a0f1c5433363c247caf027f928b2397c86963910d4",
+      "role": "service"
+    },
+    {
+      "repository": "nestjs/nest",
+      "commit": "35142c3eca8edaaf6abc5984d915da2fbd458aa2",
+      "path": "sample/07-sequelize/src/users/users.service.ts",
+      "sha256": "16695d3130aee1914f7c94f88d2c2c719d7ef232bf1dbcbe58b7d8f2ce8b02bf",
+      "role": "service"
+    },
+    {
+      "repository": "nestjs/nest",
+      "commit": "35142c3eca8edaaf6abc5984d915da2fbd458aa2",
+      "path": "integration/graphql-code-first/src/recipes/models/recipe.ts",
+      "sha256": "15021395625c5a16f410d7cb99058d41f5db455b5524b8e975da77b2c2860df4",
+      "role": "model"
+    },
+    {
+      "repository": "nestjs/nest",
+      "commit": "35142c3eca8edaaf6abc5984d915da2fbd458aa2",
+      "path": "tools/gulp/util/task-helpers.ts",
+      "sha256": "1ed10173ea6d35806206c05afa25014c2ad0a588b21120c17a0d1db3976c89ea",
+      "role": "util"
+    }
+  ]
+}

@@ -10,7 +10,7 @@ export async function createSupabaseClient() {
 
   return createClient<Database>(supabaseUrl, supabasePublishableKey, {
     accessToken: async () => {
-      const token = await getToken();
+      const token = await getToken({ expiresInSeconds: 60 });
       if (!token) {
         throw new Error("A signed-in Clerk session token is required for database access.");
       }

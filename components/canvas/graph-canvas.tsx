@@ -1,18 +1,24 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
-import { Background, Controls, Handle, Panel, Position, ReactFlow, ReactFlowProvider, getNodesBounds, getViewportForBounds, useReactFlow, useStore, useUpdateNodeInternals, type Node, type NodeProps, type Edge as FlowEdge } from '@xyflow/react';
+import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
+import { Background, Controls, Handle, Panel, Position, ReactFlow, ReactFlowProvider, getNodesBounds, useReactFlow, useStore, useUpdateNodeInternals, type Node, type NodeProps, type Edge as FlowEdge } from '@xyflow/react';
 import { category, foldGraph, selectionScope, uniqueLabels, type FolderNode, type Selection } from '@/lib/canvas/model';
 import { endpointHandle, layoutGraph, rowHeight, visibleRows } from '@/lib/canvas/layout';
 import { detailIndex } from '@/lib/canvas/details';
 import { insights } from '@/lib/canvas/graph-maths';
+import { canvasViewport } from '@/lib/canvas/viewport';
 import { Rail, type CoverageSummary } from './rail';
-import { DetailPane } from './detail-pane';
+import { DetailPane, type PaneExplanation } from './detail-pane';
+import { ChatPane } from './chat-pane';
+import { classifyAnalysisBatch, explainSelectedTarget } from '@/app/(workspace)/analyses/ai-actions';
+import type { AIAvailability, CachedExplanation } from '@/lib/ai/service';
 import type { Edge, FileNode } from '@/lib/parser/types';
+import type { FrameworkMetadata } from '@/lib/adapters/taxonomy';
 import '@xyflow/react/dist/style.css';
 import './canvas.css';
 
-type CanvasProps = { files: FileNode[]; edges: Edge[]; repositoryName: string; coverage: CoverageSummary };
+type CanvasProps = { analysisId: string; attempt: string; ai: AIAvailability; explanations: CachedExplanation[]; classifiedCount: number; files: FileNode[]; edges: Edge[]; repositoryName: string; coverage: CoverageSummary; metadata: FrameworkMetadata };
 type PanelData = { categoryFiles: Set<string> | null; matches: number; folder: FolderNode; expanded: boolean; dimmed: boolean; highlightedFiles: Set<string>; selection: Selection; hover: Selection; reveal: { id: string; revision: number } | null; setHover: (selection: Selection) => void; start: number; labels: Map<string, string>; toggle: (id: string) => void; select: (selection: Selection) => void; scroll: (id: string, start: number) => void };
 type PanelNode = Node<PanelData, 'folder'>;
 function Endpoint({ id, top }: { id: string; top?: number }) {
@@ -50,12 +56,93 @@ function FolderPanel({ id, data }: NodeProps<PanelNode>) {
   </div>;
 }
 const nodeTypes = { folder: FolderPanel };
-function Canvas({ files, edges, repositoryName, coverage }: CanvasProps) {
+function Canvas({ analysisId, attempt, ai, explanations, classifiedCount, files, edges, repositoryName, coverage, metadata }: CanvasProps) {
   const graph = useMemo(() => foldGraph(files, edges), [files, edges]);
   const [activeCategory, setCategory] = useState<string | null>(null);
   const categoryFiles = useMemo(() => activeCategory ? new Set(files.filter(file => category(file).id === activeCategory).map(file => file.id)) : null, [files, activeCategory]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<Selection>(null);
+  const [paneMode, setPaneMode] = useState<'details' | 'ask'>('details');
+  const router = useRouter();
+  const [, startTransition] = useTransition();
+  const [explanationStates, setExplanationStates] = useState<Map<string, PaneExplanation>>(new Map());
+  const requests = useRef(new Set<string>());
+  const explanationMap = useMemo(() => {
+    const hydrated = new Map<string, PaneExplanation>(explanations.map(item => [`${item.target.kind}:${item.target.id}`, { key: item.key, body: item.body }]));
+    for (const [target, state] of explanationStates) {
+      const saved = hydrated.get(target);
+      if (!saved || !state.key || state.key === saved.key) hydrated.set(target, state);
+    }
+    return hydrated;
+  }, [explanations, explanationStates]);
+  const explanation = selection ? explanationMap.get(`${selection.kind}:${selection.id}`) : undefined;
+  const explain = useCallback(() => {
+    if (!selection) return;
+    const target = { ...selection };
+    const key = `${target.kind}:${target.id}`;
+    if (requests.current.has(key)) return;
+    requests.current.add(key);
+    setExplanationStates(previous => new Map(previous).set(key, { ...explanationMap.get(key), loading: true, error: undefined }));
+    startTransition(async () => {
+      try {
+        const result = await explainSelectedTarget(analysisId, target);
+        setExplanationStates(previous => new Map(previous).set(key, result.status === 'ok' ? { body: result.body, key: result.key, result, loading: false } : { ...previous.get(key), loading: false, error: result.message.includes('CARTOGRAPH_') ? 'Choose an exact explanation model before continuing.' : result.message }));
+      } catch { setExplanationStates(previous => new Map(previous).set(key, { ...previous.get(key), loading: false, error: 'The explanation request could not complete. Try again.' })); }
+      finally { requests.current.delete(key); }
+    });
+  }, [selection, explanationMap, analysisId]);
+  const classificationRun = useRef<{ cancelled: boolean } | null>(null);
+  const context = JSON.stringify([analysisId, attempt, ai.classificationModel]);
+  const classificationContext = useRef<string | null>(null);
+  const [classificationPending, setClassificationPending] = useState<string | null>(null);
+  const classifying = classificationPending === context;
+  const [classificationMessage, setClassificationMessage] = useState('');
+  const unidentifiedFiles = JSON.stringify(files.filter(file => file.annotations.role === 'generic' || !file.annotations.role).map(file => file.id).sort());
+  const classificationEnabled = Boolean(ai.classificationModel && ai.connectionStatus?.authorized && ai.connectionStatus.sharing && unidentifiedFiles !== '[]');
+  const classify = () => {
+    if (classificationRun.current || !classificationEnabled) return;
+    const run = { cancelled: false };
+    classificationRun.current = run;
+    setClassificationPending(context);
+    startTransition(async () => {
+        let count = classifiedCount;
+        let changed = false;
+        setClassificationMessage('Assigning roles to unidentified files…');
+        try {
+          for (;;) {
+            const result = await classifyAnalysisBatch(analysisId);
+            const next = Object.keys(result.roles).length;
+            changed ||= next > count;
+            if (run.cancelled || classificationContext.current !== context) break;
+            if (result.status !== 'ok') { setClassificationMessage(result.message ?? 'Role classification could not complete.'); break; }
+            setClassificationMessage(result.remaining ? `${result.remaining} unidentified files remaining.` : 'File roles updated.');
+            if (!result.remaining) break;
+            if (next <= count || result.processed === 0) { setClassificationMessage('Role classification made no progress. Click Classify files to try again.'); break; }
+            count = next;
+          }
+        } catch { if (!run.cancelled && classificationContext.current === context) setClassificationMessage('Role classification could not complete. Click Classify files to try again.'); }
+        finally {
+          const ownsPendingState = classificationRun.current === run;
+          if (ownsPendingState) classificationRun.current = null;
+          if (classificationContext.current === context) {
+            if (ownsPendingState) {
+              setClassificationPending(null);
+              if (run.cancelled) setClassificationMessage('Classification stopped. Click Classify files to continue when available.');
+            }
+            if (changed) router.refresh();
+          }
+        }
+    });
+  };
+  useEffect(() => {
+    classificationContext.current = context;
+    return () => {
+      classificationContext.current = null;
+      if (classificationRun.current) classificationRun.current.cancelled = true;
+      classificationRun.current = null;
+    };
+  }, [context]);
+  useEffect(() => () => { if (classificationRun.current) classificationRun.current.cancelled = true; }, [analysisId, attempt, ai.classificationModel, ai.connectionStatus?.authorized, ai.connectionStatus?.sharing, unidentifiedFiles]);
   const [hover, setHover] = useState<Selection>(null);
   const [reveal, setReveal] = useState<{ id: string; revision: number } | null>(null);
   const index = useMemo(() => detailIndex(files, edges), [files, edges]);
@@ -65,6 +152,7 @@ function Canvas({ files, edges, repositoryName, coverage }: CanvasProps) {
   const viewportReady = useStore(state => !!state.panZoom && state.width > 0 && state.height > 0);
   const measuredSizes = useStore(state => [...state.nodeLookup.values()].map(node => `${node.id}:${node.measured?.width}:${node.measured?.height}`).join('|'));
   const pendingFit = useRef(true);
+  const initialFit = useRef(true);
   const openingZoom = useRef(1);
   const toggle = useCallback((id: string) => {
     pendingFit.current = false;
@@ -125,16 +213,21 @@ function Canvas({ files, edges, repositoryName, coverage }: CanvasProps) {
       const element = document.querySelector('.graph-map');
       if (!element) return;
       const bounds = getNodesBounds(flow.getNodes());
-      const viewport = getViewportForBounds(bounds, element.clientWidth, element.clientHeight, 0.05, Math.min(openingZoom.current, flow.getZoom(), 1), 0.12);
+      const viewport = canvasViewport(bounds, element.clientWidth, element.clientHeight, Math.min(openingZoom.current, flow.getZoom(), 1), initialFit.current);
       void flow.setViewport(viewport, { duration: 0 });
       pendingFit.current = false;
+      initialFit.current = false;
     });
     return () => cancelAnimationFrame(frame);
   }, [viewportReady, measuredSizes, positions, flow, nodes]);
-  return <><Rail repositoryName={repositoryName} files={files} edgeCount={edges.length} graph={graph} index={index} findings={findings} coverage={coverage} activeCategory={activeCategory} setCategory={setCategory} selectFile={selectFile} /><section className="graph-map" aria-label="Repository dependency map"><p className="graph-caption">Click a folder to open it. Select a file to trace its imports. Esc clears selection.</p><ReactFlow zIndexMode="manual" elevateEdgesOnSelect={false} elevateNodesOnSelect={false} nodes={nodes} edges={canvasEdges} nodeTypes={nodeTypes} minZoom={0.05} maxZoom={1.5} nodesDraggable={false} nodesConnectable={false} edgesFocusable={false} onPaneClick={() => setSelection(null)} proOptions={{ hideAttribution: false }}>
-    <Panel position="top-right"><button className="clear-selection" disabled={!selection} onClick={() => setSelection(null)}>Clear selection</button></Panel>
+  return <><Rail metadata={metadata} repositoryName={repositoryName} files={files} edgeCount={edges.length} graph={graph} index={index} findings={findings} coverage={coverage} activeCategory={activeCategory} setCategory={setCategory} selectFile={selectFile} /><section className="graph-map" aria-label="Repository dependency map"><p className="graph-caption">Click a folder to open it. Select a file to trace its imports. Esc clears selection.{classificationMessage && <span className="classification-status" role="status">{classificationMessage}</span>}</p><ReactFlow zIndexMode="manual" elevateEdgesOnSelect={false} elevateNodesOnSelect={false} nodes={nodes} edges={canvasEdges} nodeTypes={nodeTypes} minZoom={0.05} maxZoom={1.5} nodesDraggable={false} nodesConnectable={false} edgesFocusable={false} onPaneClick={() => setSelection(null)} proOptions={{ hideAttribution: false }}>
+    <Panel position="top-right"><div className="map-actions"><button className="clear-selection" title="Assign semantic roles to unidentified files using your connected ChatGPT plan." disabled={classifying || !classificationEnabled} onClick={classify}>{classifying ? 'Classifying…' : 'Classify files'}</button><button className="clear-selection" disabled={!selection} onClick={() => setSelection(null)}>Clear selection</button></div></Panel>
     <Background color="var(--border)" gap={20} size={1} /><Controls showInteractive={false} fitViewOptions={{ maxZoom: 1 }} />
-  </ReactFlow></section><DetailPane categoryFiles={categoryFiles} repositoryName={repositoryName} edgeCount={edges.length} index={index} graph={graph} selection={selection} hover={hover} selectFile={selectFile} setHover={setHover} /></>;
+  </ReactFlow></section><div className="canvas-right-pane" data-mode={paneMode}>
+    <div className="canvas-pane-mode" aria-label="Right pane mode"><button aria-pressed={paneMode === 'details'} onClick={() => setPaneMode('details')}>Details</button><button aria-pressed={paneMode === 'ask'} onClick={() => setPaneMode('ask')}>Ask</button></div>
+    <div className="canvas-detail-mode" hidden={paneMode !== 'details'}><DetailPane analysisId={analysisId} explanation={explanation} explanationEnabled={Boolean(ai.explanationModel)} explain={explain} metadata={metadata} categoryFiles={categoryFiles} repositoryName={repositoryName} edgeCount={edges.length} index={index} graph={graph} selection={selection} hover={hover} selectFile={selectFile} setHover={setHover} /></div>
+    <ChatPane key={`${analysisId}:${attempt}`} analysisId={analysisId} active={paneMode === 'ask'} selection={selection} paths={[...index.files.keys()]} selectFile={selectFile} />
+  </div></>;
 }
 export function GraphCanvas(props: CanvasProps) {
   return <ReactFlowProvider><Canvas {...props} /></ReactFlowProvider>;

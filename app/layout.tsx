@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
+import { auth } from '@clerk/nextjs/server';
 import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ThemeControl } from "@/components/theme-control";
@@ -15,6 +16,7 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const { userId } = await auth();
   const savedTheme = (await cookies()).get(themeCookie)?.value;
   const theme = isThemePreference(savedTheme) ? savedTheme : "system";
 
@@ -23,7 +25,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body>
         <header className="app-header">
           <Link href="/" prefetch={false} className="app-name">Cartograph</Link>
-          <ThemeControl initialTheme={theme} />
+          <div className="header-controls"><ThemeControl initialTheme={theme} /><Link href={userId ? '/' : '/sign-in'} prefetch={false}>{userId ? 'Workspace' : 'Sign in'}</Link></div>
         </header>
         {children}
       </body>
