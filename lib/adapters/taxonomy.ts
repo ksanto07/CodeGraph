@@ -13,13 +13,18 @@ const categories = {
   component: { id: 'component', name: 'Components', color: '#a78bfa' },
   hook: { id: 'hook', name: 'Hooks', color: '#fbbf24' },
   config: { id: 'config', name: 'Configuration', color: '#94a3b8' },
+  route: { id: 'route', name: 'Routers', color: '#60a5fa' },
+  middleware: { id: 'middleware', name: 'Middleware', color: '#fbbf24' },
+  model: { id: 'model', name: 'Models', color: '#a78bfa' },
+  repository: { id: 'repository', name: 'Repositories', color: '#34d399' },
+  util: { id: 'util', name: 'Utilities', color: '#94a3b8' },
   generic: { id: 'generic', name: 'Files', color: '#64748b' },
 } satisfies Record<string, RoleCategory>;
 const taxonomy: Record<FrameworkId, readonly RoleCategory[]> = {
   nextjs: [categories.page, categories.api, categories.action, categories.component, categories.hook, categories.config, categories.generic],
   nestjs: [categories.controller, categories.service, categories.module, categories.entity, categories.config, categories.generic],
   react: [categories.component, categories.hook, categories.config, categories.generic],
-  express: [categories.generic],
+  express: [categories.route, categories.controller, categories.service, categories.middleware, categories.model, categories.repository, categories.util, categories.config, categories.generic],
   none: [categories.config, categories.generic],
 };
 export function frameworkCategories(framework: FrameworkId): readonly RoleCategory[] { return taxonomy[framework]; }

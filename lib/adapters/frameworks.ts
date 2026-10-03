@@ -52,7 +52,7 @@ function basePath(source: SourceFile | undefined): string | undefined {
 const verbs = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']);
 export async function analyzeFramework(root: string, graph: ParseResult): Promise<{ graph: ParseResult; metadata: FrameworkMetadata }> {
   const packages = await manifests(root);
-  const detection: [FrameworkId, string][] = [['nextjs', 'next'], ['nestjs', '@nestjs/core'], ['react', 'react']];
+  const detection: [FrameworkId, string][] = [['nextjs', 'next'], ['nestjs', '@nestjs/core'], ['react', 'react'], ['express', 'express']];
   const framework = detection.find(([, dependency]) => packages.some(item => item.dependencies.has(dependency)))?.[0] ?? 'none';
   const project = new Project({ skipAddingFilesFromTsConfig: true });
   const sources = new Map<string, SourceFile>();
@@ -107,6 +107,16 @@ export async function analyzeFramework(root: string, graph: ParseResult): Promis
     } else if (framework === 'react') {
       if (/(?:^|\/)hooks\//.test(relative) || /(?:^|\/)use[A-Z][^/]*\.[jt]sx?$/.test(relative)) role = 'hook';
       else if (/\.[jt]sx$/.test(relative) || /(?:^|\/)components\//.test(relative)) role = 'component';
+    } else if (framework === 'express') {
+      const directoryRoles = [
+        ['controller', 'controllers', 'controller'], ['service', 'services', 'service'],
+        ['route', 'routes', 'route'], ['middleware', 'middlewares', 'middleware'],
+        ['model', 'models', 'model'], ['repository', 'repositories', 'repository'],
+        ['util', 'utils', 'util'], ['config', 'configs', 'config'],
+      ];
+      const folders = relative.split('/').slice(0, -1);
+      const match = directoryRoles.find(([singular, plural]) => folders.includes(singular) || folders.includes(plural));
+      if (match) role = match[2];
     }
     return { ...file, annotations: { ...annotated, role } };
   });

@@ -28,7 +28,7 @@ export function detailIndex(files: readonly FileNode[], edges: readonly Edge[]):
     files: byId, incoming: rows(incoming), outgoing: rows(outgoing),
     dependedOn: ordered.filter(file => incoming.get(file.id)!.size > 0).sort((a, b) => incoming.get(b.id)!.size - incoming.get(a.id)!.size || compare(a.id, b.id)),
     entryFiles: ordered.filter(file => incoming.get(file.id)!.size === 0).sort((a, b) => outgoing.get(b.id)!.size - outgoing.get(a.id)!.size || compare(a.id, b.id)),
-    unidentified: ordered.filter(file => Object.keys(file.annotations).length === 0).length,
+    unidentified: ordered.filter(file => file.annotations.role === 'generic' || Object.keys(file.annotations).length === 0).length,
   };
 }
 export function folderKinds(folder: FolderNode) {

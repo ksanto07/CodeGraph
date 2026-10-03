@@ -1,4 +1,4 @@
-export type ImportKind = 'import' | 're-export' | 'dynamic-import';
+export type ImportKind = 'import' | 're-export' | 'dynamic-import' | 'require';
 export type UnresolvedReason = 'missing-file' | 'missing-package' | 'non-literal' | 'resolver-error';
 export interface FileNode {
   id: string;
@@ -9,6 +9,7 @@ export interface FileNode {
   fanIn: number;
   fanOut: number;
   annotations: Readonly<Record<string, string>>;
+  exportNames?: string[];
 }
 export interface Edge { from: string; to: string; kind: ImportKind }
 export type ImportOutcome =
