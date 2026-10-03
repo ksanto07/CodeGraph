@@ -14,6 +14,13 @@ export type Database = {
     Tables: {
       analyses: {
         Row: {
+          is_seed: boolean
+          attempt_id: string
+          stage: string
+          message: string
+          updated_at: string
+          commit_sha: string | null
+          parser_metadata: Json | null
           created_at: string
           id: string
           organization_id: string
@@ -21,6 +28,13 @@ export type Database = {
           state: Database["public"]["Enums"]["analysis_state"]
         }
         Insert: {
+          is_seed?: boolean
+          attempt_id?: string
+          stage?: string
+          message?: string
+          updated_at?: string
+          commit_sha?: string | null
+          parser_metadata?: Json | null
           created_at?: string
           id?: string
           organization_id: string
@@ -28,6 +42,13 @@ export type Database = {
           state?: Database["public"]["Enums"]["analysis_state"]
         }
         Update: {
+          is_seed?: boolean
+          attempt_id?: string
+          stage?: string
+          message?: string
+          updated_at?: string
+          commit_sha?: string | null
+          parser_metadata?: Json | null
           created_at?: string
           id?: string
           organization_id?: string
@@ -46,6 +67,7 @@ export type Database = {
       }
       edges: {
         Row: {
+          kind: string
           analysis_id: string
           id: string
           organization_id: string
@@ -53,6 +75,7 @@ export type Database = {
           target_file_id: string
         }
         Insert: {
+          kind?: string
           analysis_id: string
           id?: string
           organization_id: string
@@ -60,6 +83,7 @@ export type Database = {
           target_file_id: string
         }
         Update: {
+          kind?: string
           analysis_id?: string
           id?: string
           organization_id?: string
@@ -160,18 +184,21 @@ export type Database = {
       }
       files: {
         Row: {
+          node: Json | null
           analysis_id: string
           id: string
           organization_id: string
           path: string
         }
         Insert: {
+          node?: Json | null
           analysis_id: string
           id?: string
           organization_id: string
           path: string
         }
         Update: {
+          node?: Json | null
           analysis_id?: string
           id?: string
           organization_id?: string
@@ -278,7 +305,12 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      claim_repository: { Args: { repository_slug: string }; Returns: Json }
+      restart_analysis: { Args: { analysis_id: string }; Returns: Json }
+      advance_analysis: { Args: { analysis_id: string; attempt: string; next_stage: string; status_message: string; failed?: boolean }; Returns: boolean }
+      publish_analysis: { Args: { analysis_id: string; attempt: string; commit_id: string; parsed: Json }; Returns: boolean }
+      analysis_graph: { Args: { analysis_id: string }; Returns: Json }
+      ensure_current_organization: { Args: Record<PropertyKey, never>; Returns: undefined }
     }
     Enums: {
       analysis_state: "queued" | "running" | "completed" | "failed"

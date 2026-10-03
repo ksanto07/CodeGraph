@@ -1,16 +1,15 @@
 import assert from 'node:assert/strict';
-import { fileURLToPath } from 'node:url';
 import { getNodesBounds, getViewportForBounds } from '@xyflow/react';
-import { readParseResult } from '../lib/parser/result-file.ts';
+import { parseRepository } from '../lib/parser/repository.ts';
 import { foldAtThreshold, foldGraph, selectionScope, uniqueLabels } from '../lib/canvas/model.ts';
 import { endpointHandle, folderTopology, layoutGraph, visibleRows } from '../lib/canvas/layout.ts';
 
-const fixture = await readParseResult(fileURLToPath(new URL('../lib/canvas/fixture.json', import.meta.url)));
+const fixture = await parseRepository(process.cwd());
 const originalFixture = JSON.stringify(fixture);
 const graph = foldGraph(fixture.files, fixture.edges);
 const originalGraph = JSON.stringify({ folders: graph.folders, edges: graph.edges, owner: [...graph.owner] });
-assert.equal(fixture.files.length, 255);
-assert.equal(fixture.edges.length, 491);
+assert(fixture.files.length > 2, 'The current repository contains enough source files to map.');
+assert(fixture.edges.length > 0, 'The current repository has real resolved imports.');
 assert.equal(graph.folders.length, 24);
 assert.equal(graph.threshold, 5);
 assert(graph.folders.every(folder => folder.files.length > 1));

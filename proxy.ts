@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest, type NextFetchEvent } from "next/server";
+import { type NextRequest, type NextFetchEvent } from "next/server";
 import { readEnvironment } from "@/lib/env";
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
@@ -11,7 +11,6 @@ const authenticatedProxy = clerkMiddleware(async (auth, request) => {
 }, { signInUrl: "/sign-in", signUpUrl: "/sign-up" });
 
 export default function proxy(request: NextRequest, event: NextFetchEvent) {
-  if (request.nextUrl.pathname === "/preview" || request.nextUrl.pathname === "/preview/") return NextResponse.next();
   readEnvironment();
   return authenticatedProxy(request, event);
 }

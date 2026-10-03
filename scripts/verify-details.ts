@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import { detailIndex, folderKinds } from '../lib/canvas/details.ts';
 import { foldGraph } from '../lib/canvas/model.ts';
-import { readParseResult } from '../lib/parser/result-file.ts';
-import { fileURLToPath } from 'node:url';
+import { parseRepository } from '../lib/parser/repository.ts';
 import type { Edge, FileNode } from '../lib/parser/types.ts';
 
 const file = (id: string): FileNode => ({ id, folder: id.includes('/') ? id.slice(0, id.lastIndexOf('/')) : '.', lines: 4, sha256: '', moduleKind: 'module', fanIn: 99, fanOut: 99, annotations: {} });
@@ -29,7 +28,7 @@ assert.equal(JSON.stringify({ files, edges }), original, 'Detail calculations pr
 const annotated = { ...files[0], annotations: { convention: 'known' } };
 assert.equal(detailIndex([annotated, ...files.slice(1)], edges).unidentified, 3);
 assert.throws(() => detailIndex(files, [{ from: 'missing.ts', to: 'src/a.ts', kind: 'import' }]), /endpoint/);
-const fixture = await readParseResult(fileURLToPath(new URL('../lib/canvas/fixture.json', import.meta.url)));
+const fixture = await parseRepository(process.cwd());
 const snapshot = JSON.stringify(fixture);
 const real = detailIndex(fixture.files, fixture.edges);
 for (const item of fixture.files) {
