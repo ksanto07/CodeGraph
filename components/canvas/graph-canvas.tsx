@@ -1,11 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
-import { Background, Controls, Handle, Panel, Position, ReactFlow, ReactFlowProvider, getNodesBounds, getViewportForBounds, useReactFlow, useStore, useUpdateNodeInternals, type Node, type NodeProps, type Edge as FlowEdge } from '@xyflow/react';
+import { Background, Controls, Handle, Panel, Position, ReactFlow, ReactFlowProvider, getNodesBounds, useReactFlow, useStore, useUpdateNodeInternals, type Node, type NodeProps, type Edge as FlowEdge } from '@xyflow/react';
 import { category, foldGraph, selectionScope, uniqueLabels, type FolderNode, type Selection } from '@/lib/canvas/model';
 import { endpointHandle, layoutGraph, rowHeight, visibleRows } from '@/lib/canvas/layout';
 import { detailIndex } from '@/lib/canvas/details';
 import { insights } from '@/lib/canvas/graph-maths';
+import { canvasViewport } from '@/lib/canvas/viewport';
 import { Rail, type CoverageSummary } from './rail';
 import { DetailPane } from './detail-pane';
 import type { Edge, FileNode } from '@/lib/parser/types';
@@ -66,6 +67,7 @@ function Canvas({ files, edges, repositoryName, coverage, metadata }: CanvasProp
   const viewportReady = useStore(state => !!state.panZoom && state.width > 0 && state.height > 0);
   const measuredSizes = useStore(state => [...state.nodeLookup.values()].map(node => `${node.id}:${node.measured?.width}:${node.measured?.height}`).join('|'));
   const pendingFit = useRef(true);
+  const initialFit = useRef(true);
   const openingZoom = useRef(1);
   const toggle = useCallback((id: string) => {
     pendingFit.current = false;
@@ -126,9 +128,10 @@ function Canvas({ files, edges, repositoryName, coverage, metadata }: CanvasProp
       const element = document.querySelector('.graph-map');
       if (!element) return;
       const bounds = getNodesBounds(flow.getNodes());
-      const viewport = getViewportForBounds(bounds, element.clientWidth, element.clientHeight, 0.05, Math.min(openingZoom.current, flow.getZoom(), 1), 0.12);
+      const viewport = canvasViewport(bounds, element.clientWidth, element.clientHeight, Math.min(openingZoom.current, flow.getZoom(), 1), initialFit.current);
       void flow.setViewport(viewport, { duration: 0 });
       pendingFit.current = false;
+      initialFit.current = false;
     });
     return () => cancelAnimationFrame(frame);
   }, [viewportReady, measuredSizes, positions, flow, nodes]);
