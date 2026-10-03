@@ -8,6 +8,7 @@ import { classificationInstructions, classificationPromptVersion, explanationCon
   explanationInstructions, explanationPaths, explanationPromptVersion, readSemanticRole, type ExplanationContext } from '../lib/ai/context.ts';
 import { evaluatePaths } from '../lib/evals/paths.ts';
 import { readSpecificityJudgment } from '../lib/evals/judge.ts';
+import { prepareHeldOutDataset, type HeldOutDataset } from '../lib/evals/dataset.ts';
 import type { FileNode, Edge } from '../lib/parser/types.ts';
 import { retiredExplanationInstructions, retiredExplanationPromptVersion } from './prompts/explain-v1.ts';
 
@@ -42,10 +43,34 @@ function contextFrom(value: unknown): ExplanationContext {
   return explanationContext([...byId.values()], edges, { kind: 'file', id: text(target.id) });
 }
 interface EvalExample { context: ExplanationContext; expectedRole: string; provenance: Record<string, unknown> }
+let verifiedDataset: Promise<HeldOutDataset> | undefined;
+function verifiedGroundTruth(): Promise<HeldOutDataset> {
+  if (!verifiedDataset) {
+    verifiedDataset = (async () => {
+      const manifest: unknown = JSON.parse(await readFile(new URL('./datasets/roles.json', import.meta.url), 'utf8'));
+      return prepareHeldOutDataset(manifest);
+    })().catch(error => { verifiedDataset = undefined; throw error; });
+  }
+  return verifiedDataset;
+}
 export async function readPreparedEvaluationDataset(filename: string) {
   const dataset = record(JSON.parse(await readFile(filename, 'utf8')));
   if (!Array.isArray(dataset.examples) || dataset.examples.length < 30 || !/^[a-f0-9]{64}$/.test(text(dataset.manifestSha256))) {
     throw new Error('Collect at least 30 immutable held-out examples first.');
+  }
+  const verified = await verifiedGroundTruth();
+  if (dataset.manifestSha256 !== verified.manifestSha256) {
+    throw new Error('Unapproved evaluation manifest. Use the committed evals/datasets/roles.json; custom manifests are not supported by this runner.');
+  }
+  const expected = new Set(verified.examples.map(example => key(example)));
+  const supplied = dataset.examples.map(value => {
+    const entry = record(value);
+    return key({ context: entry.context, expectedRole: entry.expectedRole, provenance: entry.provenance });
+  });
+  if (dataset.schemaVersion !== verified.schemaVersion || supplied.length !== expected.size ||
+    new Set(supplied).size !== supplied.length || supplied.some(example => !expected.has(example)) ||
+    key(dataset.distribution) !== key(verified.distribution)) {
+    throw new Error('Prepared evaluation data differs from freshly verified immutable source facts. Preserve the data and manifest, then collect the committed manifest again.');
   }
   const examples: EvalExample[] = dataset.examples.map(value => {
     const entry = record(value);
@@ -157,7 +182,7 @@ export async function evaluatePrompts(userId: string, filename: string) {
         const scored = evaluatePaths(typeof outputs.body === 'string' ? outputs.body : '', paths);
         return { key: 'invented_path_free', score: outputs.error ? 0 : scored.score, comment: JSON.stringify(scored.invented) };
       }, async ({ inputs, outputs }: { inputs: Record<string, unknown>; outputs: Record<string, unknown> }) => {
-        if (outputs.error || typeof outputs.body !== 'string' || !outputs.body) return { key: 'specificity_soft', score: 0, comment: 'Generation failed; counted as zero.' };
+        if (outputs.error || typeof outputs.body !== 'string' || !outputs.body) return { key: 'specificity_soft', value: 'generation_failed', comment: 'Generation failed; no model judgment was performed.' };
         const context = explanationInput(contextFrom(inputs.context));
         const input = JSON.stringify({ facts: context, answer: outputs.body });
         try {
@@ -176,6 +201,7 @@ export async function evaluatePrompts(userId: string, filename: string) {
       url: await experimentUrl(client, results.experimentName), examples: dataset.examples.length,
       pathPasses: rows.filter(row => row.evaluationResults.results.some(result => result.key === 'invented_path_free' && result.score === 1)).length,
       judgeScored: scores.length, judgeFailed: dataset.examples.length - scores.length,
+      generationFailures: rows.filter(row => row.run.outputs?.error || row.run.error).length,
       subjectiveSpecificityMean: scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : null });
   }
   const [retired, current] = summaries;
@@ -187,7 +213,9 @@ export async function evaluateRecent(since: Date, limit = 50) {
   tracingRequired();
   const client = new Client();
   const rows = [];
-  for await (const run of client.listRuns({ projectName: process.env.LANGSMITH_PROJECT ?? 'default', startTime: since, limit, runType: 'chain', isRoot: true })) {
+  for await (const run of client.listRuns({ projectName: process.env.LANGSMITH_PROJECT ?? 'default', startTime: since, limit,
+    runType: 'chain', isRoot: true, error: false,
+    filter: 'or(eq(name, "explain-file"), eq(name, "explain-folder"))' })) {
     if (!['explain-file', 'explain-folder'].includes(run.name) || !run.end_time || run.error) continue;
     const source = run.extra?.metadata?.source;
     if (source !== undefined && source !== 'application') continue;

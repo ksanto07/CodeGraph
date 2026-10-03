@@ -13,6 +13,8 @@ Replace the example timestamp with the start of the traffic to inspect and `user
 
 The collector downloads two immutable public archives through the application archive defenses, parses real imports, and verifies all 30 manifest file hashes and conventional roles. It hides every node annotation from model contexts. The held-out set covers eight components, eight hooks, six configs, six services, one model and one util, with no repository examples. Accuracy measures agreement with these adapter conventions; it does not establish broad semantic accuracy.
 
+Each experiment process downloads and parses the committed manifest's sources again before accepting prepared data. Edited labels, contexts, provenance, distributions and duplicate examples fail validation. The experiment runner accepts only the committed manifest, even if a custom manifest was collected separately. Verify prepared data without model calls with `node scripts/verify-eval-dataset.ts /tmp/cartograph-held-out.json`.
+
 Prompt experiments compare the shipped retired `explain-v1` with current `explain-v2` over identical examples. Their path membership scores are deterministic. The specificity judge's score is a subjective model opinion. Reports include full sample counts, judge failures, measured differences only when both experiments are complete, and dashboard links returned by LangSmith.
 
 Every application Explain call, including cache hits, checks the canonical returned prose against the exact paths in its supplied context and attempts feedback delivery inside that trace. The pane distinguishes recorded feedback, local checks with tracing disabled, and failed uploads. Merely hydrating a saved pane body does not invent an inference trace.
