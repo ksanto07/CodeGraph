@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { Background, Controls, Handle, Panel, Position, ReactFlow, ReactFlowProvider, getNodesBounds, useReactFlow, useStore, useUpdateNodeInternals, type Node, type NodeProps, type Edge as FlowEdge } from '@xyflow/react';
 import { category, foldGraph, selectionScope, uniqueLabels, type FolderNode, type Selection } from '@/lib/canvas/model';
 import { endpointHandle, layoutGraph, rowHeight, visibleRows } from '@/lib/canvas/layout';
@@ -8,13 +9,15 @@ import { detailIndex } from '@/lib/canvas/details';
 import { insights } from '@/lib/canvas/graph-maths';
 import { canvasViewport } from '@/lib/canvas/viewport';
 import { Rail, type CoverageSummary } from './rail';
-import { DetailPane } from './detail-pane';
+import { DetailPane, type PaneExplanation } from './detail-pane';
+import { classifyAnalysisBatch, explainSelectedTarget } from '@/app/(workspace)/analyses/ai-actions';
+import type { AIAvailability, CachedExplanation } from '@/lib/ai/service';
 import type { Edge, FileNode } from '@/lib/parser/types';
 import type { FrameworkMetadata } from '@/lib/adapters/taxonomy';
 import '@xyflow/react/dist/style.css';
 import './canvas.css';
 
-type CanvasProps = { files: FileNode[]; edges: Edge[]; repositoryName: string; coverage: CoverageSummary; metadata: FrameworkMetadata };
+type CanvasProps = { analysisId: string; attempt: string; ai: AIAvailability; explanations: CachedExplanation[]; classifiedCount: number; files: FileNode[]; edges: Edge[]; repositoryName: string; coverage: CoverageSummary; metadata: FrameworkMetadata };
 type PanelData = { categoryFiles: Set<string> | null; matches: number; folder: FolderNode; expanded: boolean; dimmed: boolean; highlightedFiles: Set<string>; selection: Selection; hover: Selection; reveal: { id: string; revision: number } | null; setHover: (selection: Selection) => void; start: number; labels: Map<string, string>; toggle: (id: string) => void; select: (selection: Selection) => void; scroll: (id: string, start: number) => void };
 type PanelNode = Node<PanelData, 'folder'>;
 function Endpoint({ id, top }: { id: string; top?: number }) {
@@ -52,12 +55,72 @@ function FolderPanel({ id, data }: NodeProps<PanelNode>) {
   </div>;
 }
 const nodeTypes = { folder: FolderPanel };
-function Canvas({ files, edges, repositoryName, coverage, metadata }: CanvasProps) {
+function Canvas({ analysisId, attempt, ai, explanations, classifiedCount, files, edges, repositoryName, coverage, metadata }: CanvasProps) {
   const graph = useMemo(() => foldGraph(files, edges), [files, edges]);
   const [activeCategory, setCategory] = useState<string | null>(null);
   const categoryFiles = useMemo(() => activeCategory ? new Set(files.filter(file => category(file).id === activeCategory).map(file => file.id)) : null, [files, activeCategory]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<Selection>(null);
+  const router = useRouter();
+  const [, startTransition] = useTransition();
+  const [explanationStates, setExplanationStates] = useState<Map<string, PaneExplanation>>(new Map());
+  const requests = useRef(new Set<string>());
+  const explanationMap = useMemo(() => {
+    const hydrated = new Map<string, PaneExplanation>(explanations.map(item => [`${item.target.kind}:${item.target.id}`, { key: item.key, body: item.body }]));
+    for (const [target, state] of explanationStates) {
+      const saved = hydrated.get(target);
+      if (!saved || !state.key || state.key === saved.key) hydrated.set(target, state);
+    }
+    return hydrated;
+  }, [explanations, explanationStates]);
+  const explanation = selection ? explanationMap.get(`${selection.kind}:${selection.id}`) : undefined;
+  const explain = useCallback(() => {
+    if (!selection) return;
+    const target = { ...selection };
+    const key = `${target.kind}:${target.id}`;
+    if (requests.current.has(key)) return;
+    requests.current.add(key);
+    setExplanationStates(previous => new Map(previous).set(key, { ...explanationMap.get(key), loading: true, error: undefined }));
+    startTransition(async () => {
+      try {
+        const result = await explainSelectedTarget(analysisId, target);
+        setExplanationStates(previous => new Map(previous).set(key, result.status === 'ok' ? { body: result.body, key: result.key, result, loading: false } : { ...previous.get(key), loading: false, error: result.message.includes('CARTOGRAPH_') ? 'Choose an exact explanation model before continuing.' : result.message }));
+      } catch { setExplanationStates(previous => new Map(previous).set(key, { ...previous.get(key), loading: false, error: 'The explanation request could not complete. Try again.' })); }
+      finally { requests.current.delete(key); }
+    });
+  }, [selection, explanationMap, analysisId]);
+  const classificationRun = useRef('');
+  const [classificationMessage, setClassificationMessage] = useState('');
+  const unidentifiedFiles = JSON.stringify(files.filter(file => file.annotations.role === 'generic' || !file.annotations.role).map(file => file.id).sort());
+  useEffect(() => {
+    const run = `${analysisId}:${attempt}:${ai.classificationModel}:${unidentifiedFiles}`;
+    if (classificationRun.current === run || !ai.classificationModel || !ai.connectionStatus?.authorized || !ai.connectionStatus.sharing || unidentifiedFiles === '[]') return;
+    classificationRun.current = run;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      startTransition(async () => {
+        let count = classifiedCount;
+        let changed = false;
+        setClassificationMessage('Assigning roles to unidentified files…');
+        try {
+          for (;;) {
+            const result = await classifyAnalysisBatch(analysisId);
+            if (cancelled) break;
+            const next = Object.keys(result.roles).length;
+            changed ||= next > count;
+            if (result.status !== 'ok') { setClassificationMessage(result.message ?? 'Role classification could not complete.'); break; }
+            setClassificationMessage(result.remaining ? `${result.remaining} unidentified files remaining.` : 'File roles updated.');
+            if (!result.remaining) break;
+            if (next <= count || result.processed === 0) { setClassificationMessage('Role classification made no progress. Reload to try again.'); break; }
+            count = next;
+          }
+        } catch { if (!cancelled) setClassificationMessage('Role classification could not complete. Reload to try again.'); }
+        finally { if (changed && !cancelled) router.refresh(); }
+      });
+    });
+    return () => { cancelled = true; if (classificationRun.current === run) classificationRun.current = ''; };
+  }, [analysisId, attempt, ai.classificationModel, ai.connectionStatus?.authorized, ai.connectionStatus?.sharing, unidentifiedFiles, classifiedCount, router]);
   const [hover, setHover] = useState<Selection>(null);
   const [reveal, setReveal] = useState<{ id: string; revision: number } | null>(null);
   const index = useMemo(() => detailIndex(files, edges), [files, edges]);
@@ -135,10 +198,10 @@ function Canvas({ files, edges, repositoryName, coverage, metadata }: CanvasProp
     });
     return () => cancelAnimationFrame(frame);
   }, [viewportReady, measuredSizes, positions, flow, nodes]);
-  return <><Rail metadata={metadata} repositoryName={repositoryName} files={files} edgeCount={edges.length} graph={graph} index={index} findings={findings} coverage={coverage} activeCategory={activeCategory} setCategory={setCategory} selectFile={selectFile} /><section className="graph-map" aria-label="Repository dependency map"><p className="graph-caption">Click a folder to open it. Select a file to trace its imports. Esc clears selection.</p><ReactFlow zIndexMode="manual" elevateEdgesOnSelect={false} elevateNodesOnSelect={false} nodes={nodes} edges={canvasEdges} nodeTypes={nodeTypes} minZoom={0.05} maxZoom={1.5} nodesDraggable={false} nodesConnectable={false} edgesFocusable={false} onPaneClick={() => setSelection(null)} proOptions={{ hideAttribution: false }}>
+  return <><Rail metadata={metadata} repositoryName={repositoryName} files={files} edgeCount={edges.length} graph={graph} index={index} findings={findings} coverage={coverage} activeCategory={activeCategory} setCategory={setCategory} selectFile={selectFile} /><section className="graph-map" aria-label="Repository dependency map"><p className="graph-caption">Click a folder to open it. Select a file to trace its imports. Esc clears selection.{classificationMessage && <span className="classification-status" role="status">{classificationMessage}</span>}</p><ReactFlow zIndexMode="manual" elevateEdgesOnSelect={false} elevateNodesOnSelect={false} nodes={nodes} edges={canvasEdges} nodeTypes={nodeTypes} minZoom={0.05} maxZoom={1.5} nodesDraggable={false} nodesConnectable={false} edgesFocusable={false} onPaneClick={() => setSelection(null)} proOptions={{ hideAttribution: false }}>
     <Panel position="top-right"><button className="clear-selection" disabled={!selection} onClick={() => setSelection(null)}>Clear selection</button></Panel>
     <Background color="var(--border)" gap={20} size={1} /><Controls showInteractive={false} fitViewOptions={{ maxZoom: 1 }} />
-  </ReactFlow></section><DetailPane metadata={metadata} categoryFiles={categoryFiles} repositoryName={repositoryName} edgeCount={edges.length} index={index} graph={graph} selection={selection} hover={hover} selectFile={selectFile} setHover={setHover} /></>;
+  </ReactFlow></section><DetailPane analysisId={analysisId} explanation={explanation} explanationEnabled={Boolean(ai.explanationModel)} explain={explain} metadata={metadata} categoryFiles={categoryFiles} repositoryName={repositoryName} edgeCount={edges.length} index={index} graph={graph} selection={selection} hover={hover} selectFile={selectFile} setHover={setHover} /></>;
 }
 export function GraphCanvas(props: CanvasProps) {
   return <ReactFlowProvider><Canvas {...props} /></ReactFlowProvider>;

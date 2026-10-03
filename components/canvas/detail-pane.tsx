@@ -3,9 +3,13 @@ import { category, type FolderGraph, type Selection } from '@/lib/canvas/model';
 import { walk, type WalkDirection } from '@/lib/canvas/graph-maths';
 import { folderKinds, type DetailIndex } from '@/lib/canvas/details';
 import type { FrameworkMetadata } from '@/lib/adapters/taxonomy';
+import type { ExplanationResult } from '@/lib/ai/service';
+import { ExplanationProse } from './explanation-prose';
+import { rerunAnalysis } from '@/app/(workspace)/analyses/actions';
 
-interface DetailProps { metadata: FrameworkMetadata; categoryFiles: Set<string> | null; repositoryName: string; edgeCount: number; index: DetailIndex; graph: FolderGraph; selection: Selection; hover: Selection; selectFile: (id: string) => void; setHover: (selection: Selection) => void }
-export function DetailPane({ metadata, categoryFiles, repositoryName, edgeCount, index, graph, selection, hover, selectFile, setHover }: DetailProps) {
+export interface PaneExplanation { body?: string; key?: string; loading?: boolean; error?: string; result?: Extract<ExplanationResult, { status: 'ok' }> }
+interface DetailProps { analysisId: string; explanation?: PaneExplanation; explanationEnabled: boolean; explain: () => void; metadata: FrameworkMetadata; categoryFiles: Set<string> | null; repositoryName: string; edgeCount: number; index: DetailIndex; graph: FolderGraph; selection: Selection; hover: Selection; selectFile: (id: string) => void; setHover: (selection: Selection) => void }
+export function DetailPane({ analysisId, explanation, explanationEnabled, explain, metadata, categoryFiles, repositoryName, edgeCount, index, graph, selection, hover, selectFile, setHover }: DetailProps) {
   const [tab, setTab] = useState<'structure' | 'explanation'>('structure');
   const [traversal, setTraversal] = useState<{ id: string; direction: WalkDirection } | null>(null);
   const file = selection?.kind === 'file' ? index.files.get(selection.id) : undefined;
@@ -21,7 +25,16 @@ export function DetailPane({ metadata, categoryFiles, repositoryName, edgeCount,
   return <aside className="preview-details" aria-label="Details">
     {selection && <div className="detail-tabs" role="tablist" aria-label="Detail view">{(['structure', 'explanation'] as const).map(name => <button key={name} id={`detail-tab-${name}`} role="tab" aria-selected={tab === name} aria-controls={`detail-${name}`} onClick={() => setTab(name)}>{name === 'structure' ? 'Structure' : 'Explanation'}</button>)}</div>}
     <div id={selection ? `detail-${tab}` : undefined} role={selection ? "tabpanel" : undefined} aria-labelledby={selection ? `detail-tab-${tab}` : undefined}>
-      {selection && tab === 'explanation' ? <><h2 className="detail-heading detail-mono">{file ? path(file.id) : folder?.id}</h2><p className="detail-empty">No explanation yet.</p></> : file ? <>
+      {selection && tab === 'explanation' ? <>
+        <h2 className="detail-heading detail-mono">{file ? path(file.id) : folder?.id}</h2>
+        <div className="explanation-controls"><button disabled={explanation?.loading || !explanationEnabled} onClick={explain}>{explanation?.loading ? 'Explaining…' : file ? 'Explain file' : 'Explain folder'}</button></div>
+        {!explanationEnabled && <p className="detail-empty">Choose an explanation model to explain this selection.</p>}
+        {explanation?.error && <p className="explanation-error" role="alert">{explanation.error}</p>}
+        {explanation?.result && <p className="explanation-status">{explanation.result.cached ? 'Cache hit. No model call.' : 'New explanation.'} {explanation.result.tracing ? 'Run traced.' : 'Tracing unavailable.'} <code>{explanation.result.model}</code></p>}
+        {explanation?.body && !explanation.result && <p className="explanation-status">Saved explanation. Explain again to check freshness and record a cache lookup.</p>}
+        {explanation?.result && explanation.result.freshness.kind !== 'current' && <div className="explanation-notice" role="status"><p>{explanation.result.freshness.kind === 'stale' ? 'This explanation describes an older analysis.' : 'Repository freshness could not be confirmed.'}</p>{explanation.result.freshness.messages.map(message => <p key={message}>{message}</p>)}{explanation.result.freshness.changedPaths.length > 0 && <p>{explanation.result.freshness.changedPaths.length} {explanation.result.freshness.changedPaths.length === 1 ? 'file changed' : 'files changed'}.</p>}<form action={rerunAnalysis.bind(null, analysisId)}><button>Re-analyze</button></form></div>}
+        {explanation?.body ? <ExplanationProse body={explanation.body} paths={[...index.files.keys()]} selectFile={selectFile} /> : <p className="detail-empty">{explanation?.loading ? 'Reading this selection’s actual dependencies and dependents.' : 'Explain this selection using its parsed neighbours.'}</p>}
+      </> : file ? <>
         <h2 className="detail-heading">{path(file.id)}</h2>
         <dl className="detail-facts"><dt>Kind</dt><dd>{category(file).name}</dd><dt>Module</dt><dd>{file.moduleKind}</dd><dt>Folder</dt><dd className="detail-mono">{file.folder || '.'}</dd><dt>Lines</dt><dd>{file.lines}</dd></dl>
         <section className="detail-section"><h3>Trace this file</h3><div className="traversal-buttons">{(['incoming', 'outgoing'] as const).map(value => <button key={value} aria-pressed={direction === value} onClick={() => setTraversal(direction === value ? null : { id: file.id, direction: value })}>{value === 'incoming' ? 'Blast radius' : 'Dependency chain'}</button>)}</div>

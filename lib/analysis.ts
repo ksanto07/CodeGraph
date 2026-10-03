@@ -6,14 +6,14 @@ import { readFrameworkMetadata } from './adapters/metadata';
 
 export async function loadAnalysis(id: string) {
   const client = await createSupabaseClient();
-  const { data, error } = await client.from('analyses').select('id,state,stage,message,updated_at,commit_sha,project:projects!analyses_project_fk(repository)').eq('id', id).eq('is_seed', false).maybeSingle();
+  const { data, error } = await client.from('analyses').select('id,state,stage,message,updated_at,commit_sha,attempt_id,project:projects!analyses_project_fk(repository)').eq('id', id).eq('is_seed', false).maybeSingle();
   if (error) throw new Error('Could not load the analysis.', { cause: error });
   if (!data?.project) return null;
   const progress = readProgress({ id: data.id, state: data.state, stage: data.stage, message: data.message, updatedAt: data.updated_at });
-  if (data.state !== 'completed') return { repository: data.project.repository, progress, graph: null, commit: null, metadata: readFrameworkMetadata(undefined, []) };
+  if (data.state !== 'completed') return { repository: data.project.repository, progress, graph: null, commit: null, attempt: data.attempt_id, metadata: readFrameworkMetadata(undefined, []) };
   const { data: graph, error: graphError } = await client.rpc('analysis_graph', { analysis_id: id });
   if (graphError) throw new Error('Could not load the repository graph.', { cause: graphError });
   const parsed = validateParseResult(graph);
   const metadata = readFrameworkMetadata(graph && typeof graph === 'object' && !Array.isArray(graph) ? graph.frameworkMetadata : undefined, parsed.files);
-  return { repository: data.project.repository, progress, graph: parsed, commit: data.commit_sha, metadata };
+  return { repository: data.project.repository, progress, graph: parsed, commit: data.commit_sha, attempt: data.attempt_id, metadata };
 }

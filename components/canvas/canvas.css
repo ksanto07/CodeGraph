@@ -60,6 +60,12 @@
 .detail-path:hover, .detail-path.hovered, .file-row.hovered { color: var(--accent); background: var(--background); }
 .folder-panel.hovered-folder { border-color: var(--accent); }
 .detail-empty { color: var(--muted); line-height: 1.5; margin: 8px 0; }
+.explanation-prose { line-height: 1.6; overflow-wrap: anywhere; }
+.explanation-prose p, .explanation-prose ul { margin: 10px 0; }
+.explanation-prose ul { padding-left: 16px; }
+.explanation-prose code, .explanation-path { font-family: var(--font-geist-mono), monospace; font-size: 11px; }
+.explanation-path { display: inline; border: 0; padding: 0; color: var(--accent); background: transparent; text-align: left; text-decoration: underline; text-underline-offset: 2px; }
+.explanation-path:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 .detail-tabs button:focus-visible, .detail-path:focus-visible, .folder-header:focus-visible, .file-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 
 .preview-rail { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
@@ -87,3 +93,19 @@
  .routes-table { width: 100%; border-collapse: collapse; font-size: 11px; text-align: left; }
  .routes-table td, .routes-table th { padding: 5px 4px; border-bottom: 1px solid var(--border); vertical-align: top; }
  .routes-table td:first-child { white-space: nowrap; }
+
+.explanation-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.explanation-controls button { padding: 4px 7px; font-size: 11px; }
+.explanation-controls button:disabled { opacity: .5; cursor: default; }
+.explanation-status { color: var(--muted); font-size: 10px; line-height: 1.5; margin: 7px 0; }
+.explanation-notice { border-left: 2px solid var(--active); padding-left: 8px; margin: 10px 0; line-height: 1.5; }
+.explanation-error { color: var(--active); line-height: 1.5; margin: 8px 0; }
+.analysis-ai-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; border-bottom: 1px solid var(--border); padding: 7px 12px; font-size: 11px; }
+.analysis-ai-status p { margin: 0; }
+.analysis-ai-status button { font-size: 11px; padding: 3px 7px; }
+.analysis-ai-status a { text-decoration: underline; text-underline-offset: 2px; }
+.analysis-ai-status .ai-status-note { color: var(--muted); }
+.analysis-ai-status .ai-status-error { color: var(--active); width: 100%; }
+.classification-status { display: block; margin-top: 4px; }
+.analysis-explorer { display: flex; flex-direction: column; height: calc(100dvh - 48px); }
+.workspace-shell .analysis-explorer .preview-shell { flex: 1; height: auto; min-height: 420px; }

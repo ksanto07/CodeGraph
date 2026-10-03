@@ -116,18 +116,42 @@ export type Database = {
       }
       explanations: {
         Row: {
+          target_kind: string | null
+          target_path: string | null
+          content_key: string | null
+          model: string | null
+          prompt_version: string | null
+          analyzed_commit: string | null
+          expected_attempt: string | null
+          created_at: string
           analysis_id: string
           body: string
           id: string
           organization_id: string
         }
         Insert: {
+          target_kind?: string | null
+          target_path?: string | null
+          content_key?: string | null
+          model?: string | null
+          prompt_version?: string | null
+          analyzed_commit?: string | null
+          expected_attempt?: string | null
+          created_at?: string
           analysis_id: string
           body: string
           id?: string
           organization_id: string
         }
         Update: {
+          target_kind?: string | null
+          target_path?: string | null
+          content_key?: string | null
+          model?: string | null
+          prompt_version?: string | null
+          analyzed_commit?: string | null
+          expected_attempt?: string | null
+          created_at?: string
           analysis_id?: string
           body?: string
           id?: string
@@ -145,6 +169,13 @@ export type Database = {
       }
       file_roles: {
         Row: {
+          content_key: string | null
+          model: string | null
+          prompt_version: string | null
+          analyzed_commit: string | null
+          expected_attempt: string | null
+          source: string | null
+          created_at: string
           analysis_id: string
           file_id: string
           id: string
@@ -152,6 +183,13 @@ export type Database = {
           role: string
         }
         Insert: {
+          content_key?: string | null
+          model?: string | null
+          prompt_version?: string | null
+          analyzed_commit?: string | null
+          expected_attempt?: string | null
+          source?: string | null
+          created_at?: string
           analysis_id: string
           file_id: string
           id?: string
@@ -159,6 +197,13 @@ export type Database = {
           role: string
         }
         Update: {
+          content_key?: string | null
+          model?: string | null
+          prompt_version?: string | null
+          analyzed_commit?: string | null
+          expected_attempt?: string | null
+          source?: string | null
+          created_at?: string
           analysis_id?: string
           file_id?: string
           id?: string
@@ -308,6 +353,8 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      write_explanation: { Args: { analysis_id: string; expected_attempt: string; target_kind: string; target_path: string; target_members: string[]; content_key: string; model: string; prompt_version: string; analyzed_commit: string; body: string; write_secret: string }; Returns: string }
+      write_file_role: { Args: { analysis_id: string; expected_attempt: string; file_path: string; content_key: string; model: string; prompt_version: string; analyzed_commit: string; role: string; write_secret: string }; Returns: string }
       claim_repository: { Args: { repository_slug: string }; Returns: Json }
       restart_analysis: { Args: { analysis_id: string }; Returns: Json }
       advance_analysis: { Args: { analysis_id: string; attempt: string; next_stage: string; status_message: string; write_secret: string; failed?: boolean }; Returns: boolean }
