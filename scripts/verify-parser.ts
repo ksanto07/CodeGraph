@@ -1,0 +1,106 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { mkdtemp, mkdir, writeFile, rename, rm, symlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { parseRepository } from '../lib/parser/repository.ts';
+import { readParseResult, validateParseResult, writeParseResult } from '../lib/parser/result-file.ts';
+
+const directory = await mkdtemp(path.join(tmpdir(), 'codegraph-parser-'));
+const root = path.join(directory, 'repo');
+async function put(relative: string, text: string): Promise<void> {
+  const filename = path.join(root, relative);
+  await mkdir(path.dirname(filename), { recursive: true });
+  await writeFile(filename, text);
+}
+try {
+  await put('tsconfig.json', JSON.stringify({ compilerOptions: { moduleResolution: 'bundler', module: 'esnext', paths: { '@root/*': ['./src/*'] } } }));
+  const leaf = 'export const value = 1;\n';
+  await put('src/deep/leaf.ts', leaf);
+  await put('src/index.ts', "import { value } from './deep/leaf';\nimport './deep/leaf';\nexport { value } from './deep/leaf';\nimport('./deep/leaf');\nimport(`./deep/leaf`);\nimport(dynamicName);\nimport 'node:fs';\nimport '../../outside';\nimport '../dist/excluded';\nimport 'missing-package';\nexport { absent } from './missing';\n");
+  await put('dist/excluded.ts', 'export {};');
+  await put('notes.txt', 'not source');
+  await put('src/style.css', 'body { color: black; }');
+  await put('src/style-import.ts', "import './style.css';");
+  await put('packages/nested/tsconfig.json', JSON.stringify({ extends: '../../tsconfig.json', compilerOptions: { paths: { '@local/*': ['./lib/*'] } } }));
+  await put('packages/nested/lib/item.ts', 'export const nested = true;');
+  await put('packages/nested/main.ts', "import '@local/item';");
+  await put('type-import.ts', "type T = import('./src/deep/leaf').value;\nimport '@root/missing';");
+  await put('ambient.d.ts', "declare module 'virtual' { import type { value } from './src/deep/leaf'; export * from './src/deep/leaf'; }");
+  await put('dependency.ts', "import 'actual-package';");
+  await put('node_modules/actual-package/package.json', JSON.stringify({ name: 'actual-package', types: './index.d.ts' }));
+  await put('node_modules/actual-package/index.d.ts', 'export {};');
+  await put('isolated.mts', 'const untouched = 1;');
+  await put('broken.ts', 'export const = ;');
+  await put('binary.ts', '\0');
+  await writeFile(path.join(directory, 'outside.ts'), 'export {};');
+  await symlink(path.join(directory, 'outside.ts'), path.join(root, 'link.ts'));
+  const result = await parseRepository(root);
+  assert(result.files.every(file => Object.keys(file.annotations).length === 0));
+  const adapted = await parseRepository(root, { id: 'fixture', annotate: file => ({ label: file.id }) });
+  assert.equal(adapted.files[0].annotations.label, adapted.files[0].id);
+  assert.equal(result.summary.filesFound, result.summary.filesParsed + result.summary.filesSkipped);
+  assert.equal(result.files.length, 9);
+  assert(result.files.some(file => file.id === 'isolated.mts'));
+  const file = result.files.find(file => file.id === 'src/deep/leaf.ts');
+  assert(file);
+  assert.equal(file.folder, 'src/deep');
+  assert.equal(file.lines, 2);
+  assert.equal(file.sha256, createHash('sha256').update(leaf).digest('hex'));
+  assert.equal(file.fanIn, 3);
+  assert.equal(result.files.find(file => file.id === 'src/index.ts')?.fanOut, 1);
+  assert.equal(result.edges.filter(edge => edge.from === 'src/index.ts').length, 3);
+  assert.equal(result.coverage.filter(item => item.outcome.kind === 'resolved' && item.source === 'src/index.ts').length, 5);
+  assert.equal(result.summary.reExportsFound, 3);
+  assert.equal(result.summary.reExportsResolved, 2);
+  assert(result.coverage.some(item => item.source === 'packages/nested/main.ts' && item.outcome.kind === 'resolved' && item.outcome.target === 'packages/nested/lib/item.ts'));
+  assert.equal(result.coverage.filter(item => item.outcome.kind === 'outside').length, 3);
+  assert.equal(result.coverage.filter(item => item.source === 'ambient.d.ts').length, 2);
+  assert(result.coverage.some(item => item.source === 'type-import.ts' && item.kind === 'import' && item.outcome.kind === 'resolved'));
+  assert(result.coverage.some(item => item.specifier === '@root/missing' && item.outcome.kind === 'unresolved' && item.outcome.reason === 'missing-file'));
+  assert(result.coverage.some(item => item.source === 'dependency.ts' && item.outcome.kind === 'outside' && item.outcome.reason === 'Dependency file in node_modules'));
+  assert(result.coverage.some(item => item.outcome.kind === 'excluded' && item.outcome.target === 'dist/excluded.ts'));
+  assert(result.coverage.some(item => item.source === 'src/style-import.ts' && item.outcome.kind === 'excluded' && item.outcome.target === 'src/style.css'));
+  assert(result.coverage.some(item => item.outcome.kind === 'unresolved' && item.outcome.reason === 'non-literal'));
+  assert(result.skipped.some(item => item.path === 'broken.ts' && item.reason === 'parse-error'));
+  assert(result.skipped.some(item => item.path === 'link.ts' && item.reason === 'symlink'));
+  assert(result.skipped.some(item => item.path === 'binary.ts' && item.reason === 'binary'));
+  const output = path.join(directory, 'result.json');
+  await writeParseResult(output, result);
+  assert.deepEqual(await readParseResult(output), result);
+  assert.throws(() => validateParseResult({ ...result, schemaVersion: 2 }));
+  assert.throws(() => validateParseResult({ ...result, files: result.files.map(file => ({ ...file, fanIn: 999 })) }));
+  assert.throws(() => validateParseResult({ ...result, edges: [] }));
+  assert.throws(() => validateParseResult({ ...result, coverage: [...result.coverage, result.coverage[0]] }));
+  assert.throws(() => validateParseResult({ ...result, summary: { ...result.summary, filesFound: 999 } }));
+  assert.throws(() => validateParseResult({ ...result, files: [{ ...result.files[0], id: '../escape.ts' }] }));
+  const renameRoot = path.join(directory, 'rename');
+  await mkdir(renameRoot);
+  await writeFile(path.join(renameRoot, 'entry.ts'), "import './target';");
+  await writeFile(path.join(renameRoot, 'target.ts'), 'export {};');
+  assert.equal((await parseRepository(renameRoot)).coverage.filter(item => item.outcome.kind === 'unresolved').length, 0);
+  await rename(path.join(renameRoot, 'target.ts'), path.join(renameRoot, 'renamed.ts'));
+  const renamed = await parseRepository(renameRoot);
+  assert.equal(renamed.coverage.filter(item => item.outcome.kind === 'unresolved').length, 1);
+  assert.deepEqual(renamed.coverage[0].outcome, { kind: 'unresolved', reason: 'missing-file', detail: 'TypeScript could not resolve ./target from entry.ts.' });
+  const conditional = path.join(directory, 'conditional');
+  await mkdir(conditional);
+  await writeFile(path.join(conditional, 'tsconfig.json'), JSON.stringify({ compilerOptions: { module: 'nodenext', moduleResolution: 'nodenext' } }));
+  await writeFile(path.join(conditional, 'package.json'), JSON.stringify({ name: 'fixture', exports: { '.': { import: './esm.mts', require: './cjs.cts' } } }));
+  await writeFile(path.join(conditional, 'esm.mts'), 'export {};');
+  await writeFile(path.join(conditional, 'cjs.cts'), 'export {};');
+  await writeFile(path.join(conditional, 'consumer.mts'), "import 'fixture';");
+  await writeFile(path.join(conditional, 'consumer.cts'), "import 'fixture';");
+  for (const type of ['module', 'commonjs']) {
+    await mkdir(path.join(conditional, type));
+    await writeFile(path.join(conditional, type, 'package.json'), JSON.stringify({ name: `fixture-${type}`, type, exports: { '.': { import: './esm.mts', require: './cjs.cts' } } }));
+    await writeFile(path.join(conditional, type, 'esm.mts'), 'export {};');
+    await writeFile(path.join(conditional, type, 'cjs.cts'), 'export {};');
+    await writeFile(path.join(conditional, type, 'consumer.ts'), `import 'fixture-${type}';`);
+  }
+  const modes = await parseRepository(conditional);
+  for (const [source, target] of [['consumer.mts', 'esm.mts'], ['consumer.cts', 'cjs.cts'], ['module/consumer.ts', 'module/esm.mts'], ['commonjs/consumer.ts', 'commonjs/cjs.cts']]) {
+    assert.deepEqual(modes.coverage.find(item => item.source === source)?.outcome, { kind: 'resolved', target });
+  }
+  console.log('Parser fixture passed. Structural scan, aliases, coverage, degrees, rename, hashes, skips, and validated JSON round-trip hold.');
+} finally { await rm(directory, { recursive: true, force: true }); }
